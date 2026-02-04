@@ -44,7 +44,7 @@ export default function DataCollectionScreen() {
                 <Box className="flex flex-row bg-gray-200 rounded-t-lg p-4 gap-4">
                     <VStack className="flex-1 items-center" space="sm">
                         <Box className="flex flex-row items-center">
-                            <Text className="w-36">HT of Lowest Level</Text>
+                            <Text className="w-36 pr-2">HT of Lowest Level</Text>
                             <Input
                                 variant="outline"
                                 isDisabled={false}
@@ -56,7 +56,7 @@ export default function DataCollectionScreen() {
                             </Input>
                         </Box>
                         <Box className="flex flex-row items-center">
-                            <Text className="w-36">Visibility</Text>
+                            <Text className="w-36 pr-2">Visibility</Text>
                             <Input
                                 variant="outline"
                                 isDisabled={false}
@@ -68,7 +68,7 @@ export default function DataCollectionScreen() {
                             </Input>
                         </Box>
                         <Box className="flex flex-row items-center">
-                            <Text className="w-36">Summation Total</Text>
+                            <Text className="w-36 pr-2">Summation Total</Text>
                             <Input
                                 variant="outline"
                                 isDisabled={false}
@@ -80,7 +80,7 @@ export default function DataCollectionScreen() {
                             </Input>
                         </Box>
                     </VStack>
-                    <Box className="items-center justify-center px-4">
+                    <Box className="items-center justify-center w-24">
                         <Text className="text-center italic">Visibility</Text>
                     </Box>
                 </Box>
@@ -89,7 +89,7 @@ export default function DataCollectionScreen() {
                 <Box className="flex flex-row bg-white p-4 gap-4">
                     <VStack className="flex-1 items-center" space="sm">
                         <Box className="flex flex-row items-center">
-                            <Text className="w-36">Direction(Degrees)</Text>
+                            <Text className="w-36 pr-2">Direction(Degrees)</Text>
                             <Input
                                 variant="outline"
                                 isDisabled={false}
@@ -101,7 +101,7 @@ export default function DataCollectionScreen() {
                             </Input>
                         </Box>
                         <Box className="flex flex-row items-center">
-                            <Text className="w-36">Speed(MPS)</Text>
+                            <Text className="w-36 pr-2">Speed(MPS)</Text>
                             <Input
                                 variant="outline"
                                 isDisabled={false}
@@ -113,7 +113,7 @@ export default function DataCollectionScreen() {
                             </Input>
                         </Box>
                     </VStack>
-                    <Box className="flex items-center justify-center px-4">
+                    <Box className="flex items-center justify-center w-24">
                         <Text className="text-center italic">Wind</Text>
                     </Box>
                 </Box>
@@ -122,7 +122,7 @@ export default function DataCollectionScreen() {
                 <Box className="flex flex-row bg-gray-200 p-4 gap-4">
                     <VStack className="flex-1 items-center" space="sm">
                         <Box className="flex flex-row items-center">
-                            <Text className="w-36">Dry Bulb(°C)</Text>
+                            <Text className="w-36 pr-2">Dry Bulb(°C)</Text>
                             <Input
                                 variant="outline"
                                 isDisabled={false}
@@ -134,7 +134,7 @@ export default function DataCollectionScreen() {
                             </Input>
                         </Box>
                         <Box className="flex flex-row items-center">
-                            <Text className="w-36">Wet Bulb(°C)</Text>
+                            <Text className="w-36 pr-2">Wet Bulb(°C)</Text>
                             <Input
                                 variant="outline"
                                 isDisabled={false}
@@ -146,7 +146,7 @@ export default function DataCollectionScreen() {
                             </Input>
                         </Box>
                         <Box className="flex flex-row items-center">
-                            <Text className="w-36">Dew Point(°C)</Text>
+                            <Text className="w-36 pr-2">Dew Point(°C)</Text>
                             <Input
                                 variant="outline"
                                 isDisabled={false}
@@ -158,7 +158,7 @@ export default function DataCollectionScreen() {
                             </Input>
                         </Box>
                         <Box className="flex flex-row items-center">
-                            <Text className="w-36">Relative Humidity</Text>
+                            <Text className="w-36 pr-2">Relative Humidity</Text>
                             <Input
                                 variant="outline"
                                 isDisabled={false}
@@ -170,7 +170,7 @@ export default function DataCollectionScreen() {
                             </Input>
                         </Box>
                         <Box className="flex flex-row items-center">
-                            <Text className="w-36">Max. Temperature</Text>
+                            <Text className="w-36 pr-2">Max. Temperature</Text>
                             <Input
                                 variant="outline"
                                 isDisabled={false}
@@ -182,7 +182,7 @@ export default function DataCollectionScreen() {
                             </Input>
                         </Box>
                         <Box className="flex flex-row items-center">
-                            <Text className="w-36">Min. Temperature</Text>
+                            <Text className="w-36 pr-2">Min. Temperature</Text>
                             <Input
                                 variant="outline"
                                 isDisabled={false}
@@ -203,7 +203,7 @@ export default function DataCollectionScreen() {
                 <Box className="flex flex-row bg-white p-4 gap-4">
                     <VStack className="flex-1 items-center" space="sm">
                         <Box className="flex flex-row items-center">
-                            <Text className="w-36">Station Pressure</Text>
+                            <Text className="w-36 pr-2">Station Pressure</Text>
                             <Input
                                 variant="outline"
                                 isDisabled={false}
@@ -215,7 +215,7 @@ export default function DataCollectionScreen() {
                             </Input>
                         </Box>
                         <Box className="flex flex-row items-center">
-                            <Text className="w-36">MSL Pressure</Text>
+                            <Text className="w-36 pr-2">MSL Pressure</Text>
                             <Input
                                 variant="outline"
                                 isDisabled={false}
@@ -227,7 +227,7 @@ export default function DataCollectionScreen() {
                             </Input>
                         </Box>
                         <Box className="flex flex-row items-center">
-                            <Text className="w-36">Tendency</Text>
+                            <Text className="w-36 pr-2">Tendency</Text>
                             <Input
                                 variant="outline"
                                 isDisabled={false}
@@ -239,7 +239,7 @@ export default function DataCollectionScreen() {
                             </Input>
                         </Box>
                         <Box className="flex flex-row items-center">
-                            <Text className="w-36">NET 3-hr Change</Text>
+                            <Text className="w-36 pr-2">NET 3-hr Change</Text>
                             <Input
                                 variant="outline"
                                 isDisabled={false}
@@ -251,7 +251,7 @@ export default function DataCollectionScreen() {
                             </Input>
                         </Box>
                         <Box className="flex flex-row items-center">
-                            <Text className="w-36">Altimeter Setting</Text>
+                            <Text className="w-36 pr-2">Altimeter Setting</Text>
                             <Input
                                 variant="outline"
                                 isDisabled={false}
@@ -263,7 +263,7 @@ export default function DataCollectionScreen() {
                             </Input>
                         </Box>
                         <Box className="flex flex-row items-center">
-                            <Text className="w-36">Barometer</Text>
+                            <Text className="w-36 pr-2">Barometer</Text>
                             <Input
                                 variant="outline"
                                 isDisabled={false}
@@ -299,7 +299,7 @@ export default function DataCollectionScreen() {
                             </Input>
                         </Box>
                         <Box className="flex flex-row items-center">
-                            <Text className="w-36">Barograph</Text>
+                            <Text className="w-36 pr-2">Barograph</Text>
                             <Input
                                 variant="outline"
                                 isDisabled={false}
@@ -330,7 +330,7 @@ export default function DataCollectionScreen() {
 
                 <Box className="my-4 w-fit flex-none self-end">
                     <Button onPress={navigateToDataCollection2Screen}>
-                        <ButtonText>Next Page</ButtonText>
+                        <ButtonText>Next</ButtonText>
                         <ButtonIcon as={ArrowRightIcon}></ButtonIcon>
                     </Button>
                 </Box>

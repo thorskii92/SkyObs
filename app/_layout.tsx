@@ -1,7 +1,6 @@
-import { Stack } from "expo-router";
-
 import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
 import '@/global.css';
+import { Stack } from "expo-router";
 
 export default function RootLayout() {
   return (
@@ -10,7 +9,8 @@ export default function RootLayout() {
         <Stack.Screen
           name="index"
           options={{
-            title: "Home"
+            title: "Home",
+            headerBackVisible: false,
           }}
         />
         <Stack.Screen
