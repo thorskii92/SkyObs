@@ -1,6 +1,6 @@
 import { Box } from "@/components/ui/box";
-import { Fab, FabIcon, FabLabel } from "@/components/ui/fab";
-import { CalendarDaysIcon, ChevronsRightIcon, ChevronsUpDownIcon, Icon } from "@/components/ui/icon";
+import { Fab, FabLabel } from "@/components/ui/fab";
+import { CalendarDaysIcon, ChevronsUpDownIcon, Icon } from "@/components/ui/icon";
 import { Pressable } from "@/components/ui/pressable";
 import {
     Select,
@@ -12,19 +12,72 @@ import {
     SelectInput,
     SelectItem,
     SelectPortal,
-    SelectTrigger
+    SelectTrigger,
+    SelectVirtualizedList
 } from "@/components/ui/select";
 import { Text } from "@/components/ui/text";
 import { VStack } from "@/components/ui/vstack";
+import { Station } from "@/src/models/station";
+import { getStations } from "@/src/utils/api";
+import { getDB, getLStations } from "@/src/utils/db";
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
+import NetInfo from "@react-native-community/netinfo";
 import { router } from "expo-router";
 import { useEffect, useState } from "react";
 
+interface HourType {
+    time: string;
+}
+
 export default function DateTimeScreen() {
-    const [station, setStation] = useState<string | undefined>(undefined);
-    const [date, setDate] = useState<String>(new Date().toLocaleDateString());
-    const [time, setTime] = useState<String | undefined>(undefined);
+    const [isLoading, setIsLoading] = useState<boolean>(true);
+    const [stations, setStations] = useState<Station[]>([]);
+    const [station, setStation] = useState<Station | null>(null);
+    const [date, setDate] = useState<String>(new Date().toISOString().split('T')[0]);
+    const [time, setTime] = useState<String | null>(null);
     const [isContinueDisabled, setIsContinueDisabled] = useState<boolean>(true);
+
+    useEffect(() => {
+        const fetchStations = async () => {
+            setIsLoading(true);
+
+            try {
+                const netState = await NetInfo.fetch();
+
+                let results: any[] = [];
+
+                if (netState.isConnected && netState.isInternetReachable) {
+                    try {
+                        const apiResults = await getStations();
+                        if (apiResults && Array.isArray(apiResults)) {
+                            results = apiResults;
+                        } else {
+                            console.warn("Unexpected API response, falling back to local DB");
+                        }
+                    } catch (apiError) {
+                        console.warn("API fetch failed, falling back to local DB:", apiError);
+                    }
+                }
+
+                if (results.length === 0) {
+                    const db = await getDB();
+                    // Offline or API failed → use local SQLite
+                    console.log("Using local stations from SQLite");
+                    results = await getLStations(db); // pass your db instance
+                }
+
+                setStations(results);
+
+            } catch (error) {
+                console.error("Unexpected error fetching stations:", error);
+                setStations([]);
+            } finally {
+                setIsLoading(false);
+            }
+        };
+
+        fetchStations();
+    }, []);
 
     useEffect(() => {
         if (station && date && time) {
@@ -43,10 +96,9 @@ export default function DateTimeScreen() {
 
         DateTimePickerAndroid.open({
             value: new Date(),
-            design: "material",
             maximumDate: nowUtc,
             onChange: (event, selectedDate) => {
-                const currentDate = selectedDate?.toLocaleDateString() || date;
+                const currentDate = selectedDate?.toISOString().split("T")[0] || date;
                 setDate(currentDate);
             },
             mode: 'date',
@@ -54,16 +106,33 @@ export default function DateTimeScreen() {
         });
     };
 
+    const hours = Array.from({ length: 24 }, (_, i) => {
+        const hour = `${i.toString().padStart(2, "0")}00`;
+        return { label: hour, value: hour };
+    });
+
     const navigateToDataCollectionScreen = () => {
         router.push({
-            pathname: '/data-collection1',
+            pathname: '/data-collection',
             params: {
-                station: station,
+                stationId: station?.Id,
+                stationName: station?.stnName,
+                mslCor: station?.mslCor,
+                altCor: station?.altCor,
                 date: date ? date.toString() : undefined,
-                time: time ? time.toString() : undefined
+                time: time ? time.toString() : undefined,
+                status: "new",
             }
         });
     };
+
+    if (isLoading) {
+        return (
+            <Box className="flex-1 justify-center items-center">
+                <Text>Loading...</Text>
+            </Box>
+        );
+    }
 
     return (
         <Box className="flex-1 p-4">
@@ -71,23 +140,48 @@ export default function DateTimeScreen() {
                 {/* Station Box */}
                 <Box className="flex flex-row gap-4 items-center">
                     <Text className="block text-lg font-semibold w-16">Station:</Text>
-                    <Select className="flex-1" onValueChange={(value) => setStation(value)}>
+
+                    <Select className="flex-1" onValueChange={(value) => {
+                        // value comes as a string from Select, convert to number
+                        const selectedId = Number(value);
+                        const chosenStation = stations.find((s) => s.Id === selectedId) || null;
+
+                        setStation(chosenStation);
+                    }}>
                         <SelectTrigger className="flex justify-between" variant="outline" size="md">
                             <SelectInput placeholder="Select station" />
                             <SelectIcon className="mr-3" as={ChevronsUpDownIcon} />
                         </SelectTrigger>
-                        <SelectPortal>
+
+                        <SelectPortal snapPoints={[40]}>
                             <SelectBackdrop />
+
                             <SelectContent>
                                 <SelectDragIndicatorWrapper>
                                     <SelectDragIndicator />
                                 </SelectDragIndicatorWrapper>
-                                <SelectItem label="Mactan" value="Mactan" isDisabled={true} />
-                                <SelectItem label="Puerto Princesa Complex" value="Puerto Princesa Complex" />
+
+                                <SelectVirtualizedList
+                                    data={stations}
+                                    getItem={(data, index) => data[index]}
+                                    getItemCount={(data) => data.length}
+                                    // @ts-ignore
+                                    keyExtractor={(item: Station, index: number) => item.Id.toString()}
+                                    contentContainerStyle={{ paddingHorizontal: 8 }}
+                                    // @ts-ignore
+                                    renderItem={({ item }: { item: Station }) => (
+                                        <SelectItem
+                                            label={item.stnName}
+                                            value={item.Id.toString()}
+                                            style={{ flex: 1 }}
+                                        />
+                                    )}
+                                />
                             </SelectContent>
                         </SelectPortal>
                     </Select>
                 </Box>
+
 
                 {/* Date Box */}
                 <Box className="flex flex-row gap-4 items-center">
@@ -108,17 +202,24 @@ export default function DateTimeScreen() {
                             <SelectInput placeholder="Select time" />
                             <SelectIcon className="mr-3" as={ChevronsUpDownIcon} />
                         </SelectTrigger>
-                        <SelectPortal>
+                        <SelectPortal snapPoints={[40]}>
                             <SelectBackdrop />
                             <SelectContent>
                                 <SelectDragIndicatorWrapper>
                                     <SelectDragIndicator />
                                 </SelectDragIndicatorWrapper>
-
-                                {Array.from({ length: 24 }, (_, i) => {
-                                    const hour = i.toString().padStart(2, '0') + '00';
-                                    return <SelectItem key={hour} label={hour} value={hour} />;
-                                })}
+                                <SelectVirtualizedList
+                                    data={hours}
+                                    centerContent={true}
+                                    getItem={(data, index) => data[index]}
+                                    getItemCount={(data) => data.length}
+                                    // @ts-ignore
+                                    keyExtractor={(item, index) => item.value}
+                                    // @ts-ignore
+                                    renderItem={({ item }: { item: typeof hours[0] }) => (
+                                        <SelectItem label={item.label} value={item.value} />
+                                    )}
+                                />
                             </SelectContent>
                         </SelectPortal>
                     </Select>
@@ -135,7 +236,6 @@ export default function DateTimeScreen() {
                 onPress={navigateToDataCollectionScreen}
             >
                 <FabLabel className='font-semibold'>Continue</FabLabel>
-                <FabIcon as={ChevronsRightIcon} />
             </Fab>
         </Box>
     );

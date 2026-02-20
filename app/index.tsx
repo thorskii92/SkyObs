@@ -18,17 +18,130 @@ import { Text } from '@/components/ui/text';
 import { Textarea, TextareaInput } from '@/components/ui/textarea';
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { router } from 'expo-router';
-import { useState } from "react";
+import { useEffect, useState } from "react";
+
+import { getDB, getLSynopData } from '@/src/utils/db';
+import { getSimCards, sendSms } from "expo-android-sms-sender";
+import { PermissionsAndroid } from 'react-native';
+
+type SimCard = {
+  id: number;          // Unique SIM card identifier (subscription ID)
+  displayName: string; // SIM name as displayed in system settings
+  carrierName: string; // Mobile network carrier name
+  slotIndex?: number;  // Slot index (if available)
+};
 
 export default function Home() {
-  const [date, setDate] = useState<String>(new Date().toLocaleDateString());
+  const [station, setStation] = useState<string | undefined>();
+  const [date, setDate] = useState<string>("2025-08-01");
+  const [synopData, setSynopData] = useState<any[]>([]);
   const [showCodeOptionsDialog, setShowCodeOptionsDialog] = useState(false);
   const [showSendCodeDialog, setShowSendCodeDialog] = useState(false);
 
-  const [codeType, setCodeType] = useState<string>("");
-  const [metarCode, setMetarCode] = useState<string>("dsfs 23421 341234 3241");
-  const [synopCode, setSynopCode] = useState<string>("oijjdf 23421 41234 3124");
+  const [isLoading, setIsLoading] = useState<boolean>(true);
 
+  const [codeType, setCodeType] = useState<string>("");
+  const [metarCode, setMetarCode] = useState<string>("Your device has been compromised. Joke lang :P - SkyObs Dev Team");
+  const [synopCode, setSynopCode] = useState<string>("Hi! This was sent directly from SkyObs application. Please ignore this message. Thank you.");
+
+  const metarRecip = ["09928914218", "09489421798"];
+  const synopRecip = ["09928914218", "09469283039"];
+
+  const [isSending, setIsSending] = useState(false);
+  const [sendStatus, setSendStatus] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const fetchSynopDataByDate = async () => {
+      setIsLoading(true);
+
+      try {
+        const db = await getDB();
+        const stnID = "1";
+
+        // 1. Get local data immediately
+        let results = await getLSynopData(db, stnID, undefined, date);
+        console.log(results);
+        setSynopData(results);
+        // 2. Try API refresh if connected
+      } catch (error) {
+        console.error("Error fetching synoptic data:", error);
+        setSynopData([]);
+      } finally {
+        setIsLoading(false);
+      }
+    };
+
+    fetchSynopDataByDate();
+  }, [date]);
+
+  const sendTxtMsg = async (recipients: string[], bodySMS: string) => {
+    try {
+      setIsSending(true);
+
+      // Initialize all recipients as pending
+      const initialStatus: Record<string, string> = {};
+      recipients.forEach((num) => {
+        initialStatus[num] = "pending";
+      });
+      setSendStatus(initialStatus);
+
+      const phoneStatePermission = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE
+      );
+
+      if (phoneStatePermission !== PermissionsAndroid.RESULTS.GRANTED) {
+        console.log("READ_PHONE_STATE permission denied");
+        setIsSending(false);
+        return;
+      }
+
+      const sims: SimCard[] = await getSimCards();
+      if (!sims?.length) {
+        console.log("No SIM cards available");
+        setIsSending(false);
+        return;
+      }
+
+      const smsPermission = await PermissionsAndroid.request(
+        PermissionsAndroid.PERMISSIONS.SEND_SMS
+      );
+
+      if (smsPermission !== PermissionsAndroid.RESULTS.GRANTED) {
+        console.log("SEND_SMS permission denied");
+        setIsSending(false);
+        return;
+      }
+
+      const simId = sims[1]?.id ?? sims[0].id;
+
+      // Sequential send with live update
+      for (const number of recipients) {
+        setSendStatus((prev) => ({
+          ...prev,
+          [number]: "sending",
+        }));
+
+        try {
+          await sendSms(number, bodySMS, simId);
+
+          setSendStatus((prev) => ({
+            ...prev,
+            [number]: "sent",
+          }));
+        } catch (err) {
+          setSendStatus((prev) => ({
+            ...prev,
+            [number]: "failed",
+          }));
+        }
+      }
+
+    } catch (error) {
+      console.error("Error sending SMS:", error);
+    } finally {
+      setIsSending(false);
+    }
+  };
 
   const handleCloseShowCodeOptionsDialog = () => {
     setShowCodeOptionsDialog(false);
@@ -64,7 +177,7 @@ export default function Home() {
 
   return (
     <Box className="flex-1 gap-4 p-4">
-      <Box className="flex flex-row items-center gap-2">
+      <Box className="flex flex-row items-center gap-2 mb-8">
         <Text className='text-lg font-semibold'>Date:</Text>
         <Pressable className="flex flex-row border rounded py-2 px-8 items-center" onPress={showDatePicker}>
           <Text className="block font-bold">
@@ -202,6 +315,37 @@ export default function Home() {
           </AlertDialogHeader>
 
           <AlertDialogBody className="flex flex-col mt-3 gap-2">
+            <Box className="mb-3 gap-2">
+              {(codeType === "METAR" ? metarRecip : synopRecip).map((num) => {
+                const status = sendStatus[num] ?? "pending";
+
+                let colorClass = "bg-gray-100 text-gray-500"; // pending default
+
+                if (status === "sending") {
+                  colorClass = "bg-amber-100 text-amber-700";
+                }
+
+                if (status === "sent") {
+                  colorClass = "bg-blue-100 text-blue-700";
+                }
+
+                if (status === "failed") {
+                  colorClass = "bg-red-100 text-red-700";
+                }
+
+                return (
+                  <Box
+                    key={num}
+                    className={`px-3 py-2 rounded-md ${colorClass}`}
+                  >
+                    <Text className="font-medium">
+                      {num}
+                    </Text>
+                  </Box>
+                );
+              })}
+            </Box>
+
             <Textarea>
               <TextareaInput
                 defaultValue={codeType === "METAR" ? metarCode : synopCode}
@@ -213,20 +357,28 @@ export default function Home() {
             </Textarea>
 
             <Box className="flex flex-row justify-end gap-2 mt-4">
-              <Button action='secondary' onPress={() => {
-                handleCloseSendCodeDialog();
-              }}
+              <Button
+                action="secondary"
+                isDisabled={isSending}
+                onPress={handleCloseSendCodeDialog}
               >
                 <ButtonText>
                   Cancel
                 </ButtonText>
               </Button>
 
-              <Button action='positive' onPress={() => {
-                handleCloseSendCodeDialog();
-              }}>
+              <Button
+                action="positive"
+                isDisabled={isSending}
+                onPress={async () => {
+                  await sendTxtMsg(
+                    codeType === "METAR" ? metarRecip : synopRecip,
+                    codeType === "METAR" ? metarCode : synopCode
+                  );
+                }}
+              >
                 <ButtonText>
-                  Send
+                  {isSending ? "Sending..." : "Send"}
                 </ButtonText>
               </Button>
             </Box>
