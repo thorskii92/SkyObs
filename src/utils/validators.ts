@@ -1,3 +1,6 @@
+import { getDB, getLSynopData } from "./db";
+
+
 export type ValidationResult = {
     isValid: boolean;
     error: string;
@@ -59,19 +62,21 @@ export const validateField = (
 
 export const isTendencyValid = (
     tendency?: string,
-    rawNet3hr?: string | null
+    net3hrSign?: number | null
 ): ValidationResult => {
     return validateField(tendency, "Tendency", {
-        required: true,
         numeric: true,
         customFn: (v: string) => {
             // If net3hr is not provided, skip cross-field validation
-            if (!rawNet3hr) {
+            if (!net3hrSign) {
                 return { isValid: true, error: "" };
             }
 
             const a = Number(v);
-            const x = Number(rawNet3hr);
+            const x = Number(net3hrSign);
+
+            console.log(net3hrSign)
+            console.log(a);
 
             switch (a) {
                 case 0:
@@ -113,4 +118,111 @@ export const isTendencyValid = (
             return { isValid: true, error: "" };
         },
     });
+};
+
+
+export const validateMaxTemp = async (
+    stnID: number | string,
+    sDate: string,
+    sHour: string,
+    maxTempInput: string,
+    currentDBulbInput: string
+): Promise<ValidationResult> => {
+    try {
+        // Convert input strings to numbers
+        const maxTemp = maxTempInput === "" ? null : Number(maxTempInput);
+        const currentDBulb = currentDBulbInput === "" ? null : Number(currentDBulbInput);
+
+        // Skip validation if maxTemp is blank
+        if (maxTemp === null) return { isValid: true, error: "" };
+
+        const db = await getDB();
+
+        const hoursToCheck = Array.from({ length: 6 }, (_, i) => {
+            let h = Number(sHour) - i;
+            if (h < 0) h += 24;
+            return h.toString().padStart(2, "0");
+        });
+
+        const results = await Promise.all(
+            hoursToCheck.map(h => getLSynopData(db, stnID, h, sDate))
+        );
+
+        const synopData = results.flat();
+
+        const dryBulbs = synopData
+            .map(d => d.dBulb)
+            .filter(d => d !== undefined && d !== null) as number[];
+
+        if (currentDBulb !== null) dryBulbs.push(currentDBulb);
+
+        const highestDB = dryBulbs.length ? Math.max(...dryBulbs) : null;
+
+        if (highestDB !== null && maxTemp < highestDB)
+            return { isValid: false, error: "Max. temperature must be ≥ dry bulbs in last 6 hrs." };
+
+        return { isValid: true, error: "" };
+    } catch (error) {
+        console.error("Error validating maxTemp:", error);
+        return { isValid: true, error: "" };
+    }
+};
+
+export const validateMinTemp = async (
+    stnID: number | string,
+    sDate: string,
+    sHour: string,
+    minTempInput: string,
+    currentDBulbInput: string
+): Promise<ValidationResult> => {
+    try {
+        const minTemp = minTempInput === "" ? null : Number(minTempInput);
+        const currentDBulb = currentDBulbInput === "" ? null : Number(currentDBulbInput);
+
+        if (minTemp === null) return { isValid: true, error: "" };
+
+        const db = await getDB();
+
+        const hoursToCheck = Array.from({ length: 6 }, (_, i) => {
+            let h = Number(sHour) - i;
+            if (h < 0) h += 24;
+            return h.toString().padStart(2, "0");
+        });
+
+        const results = await Promise.all(
+            hoursToCheck.map(h => getLSynopData(db, stnID, h, sDate))
+        );
+
+        const synopData = results.flat();
+
+        const dryBulbs = synopData
+            .map(d => d.dBulb)
+            .filter(d => d !== undefined && d !== null) as number[];
+
+        if (currentDBulb !== null) dryBulbs.push(currentDBulb);
+
+        const lowestDB = dryBulbs.length ? Math.min(...dryBulbs) : null;
+
+        if (lowestDB !== null && minTemp > lowestDB)
+            return { isValid: false, error: "Min. temperature must be ≤ dry bulbs in last 6 hrs." };
+
+        return { isValid: true, error: "" };
+    } catch (error) {
+        console.error("Error validating minTemp:", error);
+        return { isValid: true, error: "" };
+    }
+};
+
+// TODO: clouds <= summTotal
+export const validateClouds = (
+    cloudAmount?: number,
+    summTotal?: number
+): ValidationResult => {
+    if (cloudAmount === undefined || summTotal === undefined) return { isValid: true, error: "" };
+
+    if (cloudAmount > summTotal) {
+        return { isValid: false, error: "Cloud coverage cannot exceed total sum (summTotal)" };
+    }
+
+    return { isValid: true, error: "" };
 };

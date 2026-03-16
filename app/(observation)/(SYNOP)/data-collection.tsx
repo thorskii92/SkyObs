@@ -1,10 +1,20 @@
 import DataCollectionForm from "@/src/components/DataCollectionForm";
+import GlobalLoading from "@/src/components/GlobalLoading";
 import { useLocalSearchParams } from "expo-router";
-import { useState } from "react";
-import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
+import { useEffect, useState } from "react";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function DataCollectionScreen() {
+    const [isLoading, setIsLoading] = useState<boolean>(true);
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            setIsLoading(false);
+        }, 1);
+
+        return () => clearTimeout(timer);
+    }, []);
+
     const params = useLocalSearchParams();
 
     const stationId = Array.isArray(params.stationId) ? params.stationId[0] : params.stationId ?? "";
@@ -13,10 +23,7 @@ export default function DataCollectionScreen() {
     const altCor = Array.isArray(params.altCor) ? params.altCor[0] : params.altCor ?? "";
     const date = Array.isArray(params.date) ? params.date[0] : params.date ?? "";
     const time = Array.isArray(params.time) ? params.time[0] : params.time ?? "";
-    const rawStatus = Array.isArray(params.status) ? params.status[0] : params.status ?? "view";
-
-    const status: "new" | "draft" | "view" =
-        ["new", "draft", "view"].includes(rawStatus) ? (rawStatus as "new" | "draft" | "view") : "view";
+    const status = Array.isArray(params.status) ? params.status[0] : params.status ?? "view";
 
     const dataParams = { stationId, stationName, mslCor, altCor, date, time, status }
 
@@ -128,7 +135,7 @@ export default function DataCollectionScreen() {
         },
         clouds: {
             amtLC: "",
-            firstLayer: { amt: "what", type: "", height: "" },
+            firstLayer: { amt: "", type: "", height: "" },
             secondLayer: { amt: "", type: "", height: "" },
             thirdLayer: { amt: "", type: "", height: "" },
             fourthLayer: { amt: "", type: "", height: "" },
@@ -165,12 +172,13 @@ export default function DataCollectionScreen() {
         });
     };
 
+    if (isLoading) {
+        return <GlobalLoading />;
+    }
 
     return (
-        <SafeAreaView className="flex-1" edges={{top:"additive", bottom: "additive"}}>
-            <KeyboardAwareScrollView className="flex-1" automaticallyAdjustKeyboardInsets bottomOffset={10}>
-                    <DataCollectionForm dataParams={dataParams} formData={formData} setField={setField} errors={errors} setError={setError} />
-            </KeyboardAwareScrollView>
+        <SafeAreaView className="flex-1" edges={{ bottom: "additive" }}>
+            <DataCollectionForm dataParams={dataParams} formData={formData} setField={setField} errors={errors} setError={setError} />
         </SafeAreaView>
     )
 }

@@ -2,7 +2,7 @@ import { getApiBaseUrl } from "../config/env";
 import { SynopData } from "../models/synop_data";
 import { get24HoursAgo, get3HoursAgo } from "./time";
 
-const API_URL = getApiBaseUrl();
+export const API_URL = getApiBaseUrl();
 
 export const getStations = async () => {
     try {
@@ -69,27 +69,44 @@ export const saveSynopData = async (synopData: SynopData) => {
     }
 };
 
-export const getPsychrometric = async (dBulb: string, wBulb: string) => {
+export const getPsychrometric = async (
+    dBulb: string,
+    wBulb: string
+) => {
     try {
-        const response = await fetch(`${API_URL}/psychrometric?dBulb=${dBulb}&wBulb=${wBulb}`);
+        const controller = new AbortController();
+        const timeout = setTimeout(() => {
+            controller.abort();
+        }, 10000); // 10 second timeout
 
+        const response = await fetch(
+            `${API_URL}/psychrometric?dBulb=${encodeURIComponent(dBulb)}&wBulb=${encodeURIComponent(wBulb)}`,
+            { signal: controller.signal }
+        );
+
+        clearTimeout(timeout);
 
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            console.warn("API responded with status:", response.status);
+            return null;
         }
 
-        const json = await response.json()
+        const json = await response.json();
 
-        if (!json.results || json.results.length === 0) return null
+        if (!json?.results?.length) return null;
 
-        const psychroData = json.results[0];
+        return json.results[0];
 
-        return psychroData;
-    } catch (error) {
-        console.error(error);
-        return null
+    } catch (error: any) {
+        if (error.name === "AbortError") {
+            console.warn("API request timed out");
+        } else {
+            console.warn("Network/API error:", error.message);
+        }
+
+        return null; // Let fallback handle it
     }
-}
+};
 
 export const get3hrAgoSynopData = async (date: string, time: string): Promise<any[] | null> => {
     try {

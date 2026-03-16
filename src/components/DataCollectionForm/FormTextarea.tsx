@@ -20,6 +20,7 @@ interface FormTextareaProps {
   setErrFn: (message: string) => void;
 
   disabled?: boolean;
+  readonly?: boolean;
   maxLength?: number;
   rows?: number;
 }
@@ -31,6 +32,7 @@ export default function FormTextarea({
   error,
   setErrFn,
   disabled = false,
+  readonly = false,
   maxLength,
   rows = 3,
 }: FormTextareaProps) {
@@ -52,6 +54,7 @@ export default function FormTextarea({
             maxLength={maxLength}
             numberOfLines={rows}
             textAlignVertical="top"
+            editable={readonly}
           />
         </Textarea>
 

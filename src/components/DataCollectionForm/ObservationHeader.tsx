@@ -1,17 +1,22 @@
+import { Badge, BadgeIcon, BadgeText } from "@/components/ui/badge";
 import { Box } from "@/components/ui/box";
 import { Button, ButtonIcon, ButtonText } from "@/components/ui/button";
 import { Heading } from "@/components/ui/heading";
-import { Text } from "@/components/ui/text";
-import { ClipboardCheck, Save } from "lucide-react-native";
+import { Calendar, ClipboardCheck, Clock, Save } from "lucide-react-native";
 import React, { memo } from "react";
 
 interface ObservationHeaderProps {
     stationName: string;
-    date: string; // ISO string or Date
+    date: string;
     time: string;
-    status: "new" | "draft" | "view";
-    onSave: () => void;
-    onMarkQC: () => void;
+
+    status: "new" | "recorded" | "validated";
+
+    onSave: () => Promise<void>;
+    onMarkQC: () => Promise<void>;
+
+    isSaving: boolean;
+    isMarkingQC: boolean;
 }
 
 const ObservationHeader = ({
@@ -21,60 +26,114 @@ const ObservationHeader = ({
     status,
     onSave,
     onMarkQC,
+    isSaving,
+    isMarkingQC,
 }: ObservationHeaderProps) => {
+
     const formattedDate = new Date(date).toLocaleDateString("en-US", {
         year: "numeric",
         month: "long",
         day: "numeric",
     });
 
-    const isReadOnly = status === "view";
+    const saveButtonLabel = () => {
+        if (status === "new") return "Save";
+        if (status === "recorded") return "Update";
+        return "Save";
+    };
 
     return (
-        <Box className="flex gap-4 bg-white px-8 pt-12 pb-4 shadow-lg w-full mb-2">
+        <Box className="flex gap-4 bg-blue-400 px-4 py-6 shadow-lg w-full rounded-xl">
+
             {/* Header */}
-            <Box className="flex flex-col space-y-1">
-                <Heading className="text-2xl text-center font-bold">{stationName}</Heading>
-                <Text className="text-lg text-center">
-                    {formattedDate} • {time}
-                </Text>
-            </Box>
+            <Box className="flex flex-col gap-2">
+                <Heading className="text-2xl text-center font-bold text-white">
+                    {stationName}
+                </Heading>
 
-            {/* Action Buttons: hidden in read-only view */}
-            {status !== "view" && (
-                <Box className="flex flex-row items-center justify-center gap-2">
+                <Box className="flex-row gap-2 items-center justify-center">
 
-                    {/* Save Button */}
-                    <Button
-                        className="flex-1 rounded-xl"
-                        action="primary"
-                        size="xl"
-                        disabled={status === "draft"}
-                        onPress={onSave}
-                    >
-                        <ButtonIcon as={Save} className="text-white" size="sm" />
-                        <ButtonText className="text-white font-semibold text-md">
-                            {status === "new" ? "Save" : "Update Draft"}
-                        </ButtonText>
-                    </Button>
+                    {/* Date */}
+                    <Badge className="rounded-lg gap-2 bg-blue-50 px-3 py-1 border border-blue-100">
+                        <BadgeIcon as={Calendar} className="text-blue-500" />
+                        <BadgeText className="text-blue-600 font-medium">
+                            {formattedDate}
+                        </BadgeText>
+                    </Badge>
 
-                    {/* Mark QC Button - only for draft */}
-                    {status === "draft" && (
-                        <Button
-                            className="flex-1 rounded-xl"
-                            action="positive"
-                            size="xl"
-                            onPress={onMarkQC}
-                        >
-                            <ButtonIcon as={ClipboardCheck} className="text-white" size="sm" />
-                            <ButtonText className="text-white font-semibold text-md">
-                                Mark QC
-                            </ButtonText>
-                        </Button>
-                    )}
+                    {/* Time */}
+                    <Badge className="rounded-lg gap-2 bg-blue-50 px-3 py-1 border border-blue-100">
+                        <BadgeIcon as={Clock} className="text-blue-500" />
+                        <BadgeText className="text-blue-600 font-medium">
+                            {time}
+                        </BadgeText>
+                    </Badge>
 
                 </Box>
-            )}
+            </Box>
+
+            {/* Action Buttons */}
+            <Box className="flex flex-row items-center justify-center gap-2">
+
+                {/* Save */}
+                <Button
+                    className={`
+          flex-1 rounded-xl bg-white
+          active:bg-blue-50
+          focus:ring-2 focus:ring-blue-200
+          disabled:opacity-50 disabled:bg-gray-100
+          ${isSaving ? "opacity-80" : ""}
+        `}
+                    size="md"
+                    disabled={isSaving}
+                    onPress={onSave}
+                >
+                    <ButtonIcon
+                        as={Save}
+                        size="sm"
+                        className="text-blue-500 group-active:text-blue-600"
+                    />
+                    <ButtonText
+                        className="
+            font-semibold text-blue-600 text-md
+            group-active:text-blue-700
+          "
+                    >
+                        {isSaving ? "Saving..." : saveButtonLabel()}
+                    </ButtonText>
+                </Button>
+
+                {/* Mark QC */}
+                {status === "recorded" && (
+                    <Button
+                        className={`
+            flex-1 rounded-xl bg-green-700
+            active:bg-green-800
+            focus:ring-2 focus:ring-green-300
+            disabled:opacity-50 disabled:bg-green-300
+            ${isMarkingQC ? "opacity-80" : ""}
+          `}
+                        size="md"
+                        disabled={isMarkingQC}
+                        onPress={onMarkQC}
+                    >
+                        {!isMarkingQC && (
+                            <ButtonIcon
+                                as={ClipboardCheck}
+                                className="text-white"
+                                size="sm"
+                            />
+                        )}
+
+                        <ButtonText
+                            className="text-white font-semibold text-md"
+                        >
+                            {isMarkingQC ? "Processing..." : "Mark QC"}
+                        </ButtonText>
+                    </Button>
+                )}
+
+            </Box>
         </Box>
     );
 };

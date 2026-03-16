@@ -34,6 +34,17 @@ interface CloudLayerInputProps {
   maxLHeight?: number;
 
   disabled?: boolean;
+
+  // navigation
+  amountKey?: string;
+  typeKey?: string;
+  heightKey?: string;
+
+  amountRef?: any;
+  typeRef?: any;
+  heightRef?: any;
+
+  setPendingAdvance: React.Dispatch<React.SetStateAction<string | null>>;
 }
 
 export default function CloudLayerInput({
@@ -54,10 +65,63 @@ export default function CloudLayerInput({
   maxLType = 2,
   maxLHeight = 3,
   disabled = false,
+  amountKey,
+  typeKey,
+  heightKey,
+  amountRef,
+  typeRef,
+  heightRef,
+  setPendingAdvance
 }: CloudLayerInputProps) {
   const showClearAmount = !disabled && amount.length > 0;
   const showClearType = !disabled && type.length > 0;
   const showClearHeight = !disabled && height.length > 0;
+
+  const handleAmountChange = (v: string) => {
+    if (v.length > maxLAmount) return;
+
+    setAmount(v);
+    setErrorAmount?.("");
+
+    if (v.length >= maxLAmount) {
+      setPendingAdvance(amountKey ?? null);
+    }
+  };
+
+  const handleTypeChange = (v: string) => {
+    if (v.length > maxLType) return;
+
+    setType(v);
+    setErrorType?.("");
+
+    if (v.length >= maxLType) {
+      setPendingAdvance(typeKey ?? null);
+    }
+  };
+
+  const handleHeightChange = (v: string) => {
+    if (v.length > 3) return;
+
+    setHeight(v);
+    setErrorHeight?.("");
+
+    if (v.length >= 3) {
+      setPendingAdvance(heightKey ?? null);
+    }
+  };
+
+  const handleHeightBlur = () => {
+    if (!height || height.trim() === "") return;
+
+    const num = Number(height);
+    if (isNaN(num)) return;
+
+    const multiplied = String(num * 10);
+
+    setHeight(multiplied);
+
+    setPendingAdvance(heightKey ?? null);
+  };
 
   return (
     <Box className="mt-3 space-y-2">
@@ -74,13 +138,14 @@ export default function CloudLayerInput({
           <Box className="relative">
             <Input size="sm" isDisabled={disabled}>
               <InputField
+                ref={amountRef}
                 value={amount}
                 maxLength={maxLAmount}
                 keyboardType="numeric"
-                onChangeText={(v) => {
-                  setAmount(v);
-                  setErrorAmount?.("");
-                }}
+                onChangeText={handleAmountChange}
+                onSubmitEditing={() => setPendingAdvance(amountKey ?? null)}
+                returnKeyType="next"
+                submitBehavior="submit"
               />
 
               {showClearAmount && (
@@ -111,13 +176,14 @@ export default function CloudLayerInput({
           <Box className="relative">
             <Input size="sm" isDisabled={disabled}>
               <InputField
+                ref={typeRef}
                 value={type}
                 maxLength={maxLType}
                 keyboardType="numeric"
-                onChangeText={(v) => {
-                  setType(v);
-                  setErrorType?.("");
-                }}
+                onChangeText={handleTypeChange}
+                onSubmitEditing={() => setPendingAdvance(typeKey ?? null)}
+                returnKeyType="next"
+                submitBehavior="submit"
               />
               {showClearType && (
                 <InputSlot
@@ -148,13 +214,15 @@ export default function CloudLayerInput({
           <Box className="relative">
             <Input size="sm" isDisabled={disabled}>
               <InputField
+                ref={heightRef}
                 value={height}
-                maxLength={maxLHeight}
+                maxLength={4}
                 keyboardType="numeric"
-                onChangeText={(v) => {
-                  setHeight(v);
-                  setErrorHeight?.("");
-                }}
+                onChangeText={handleHeightChange}
+                onBlur={handleHeightBlur}
+                onSubmitEditing={() => setPendingAdvance(heightKey ?? null)}
+                returnKeyType="next"
+               submitBehavior="submit"
               />
               {showClearHeight && (
                 <InputSlot

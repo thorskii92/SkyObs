@@ -1,5 +1,5 @@
 import { Box } from "@/components/ui/box";
-import { Checkbox, CheckboxIcon, CheckboxIndicator } from "@/components/ui/checkbox";
+import { Button, ButtonText } from "@/components/ui/button";
 import {
     FormControl,
     FormControlError,
@@ -11,7 +11,7 @@ import {
 import { CloseIcon } from "@/components/ui/icon";
 import { Input, InputField, InputIcon, InputSlot } from "@/components/ui/input";
 import { ValidationResult } from "@/src/utils/validators";
-import { AlertCircleIcon, CheckIcon } from "lucide-react-native";
+import { AlertCircleIcon } from "lucide-react-native";
 import React from "react";
 
 interface FormInputProps {
@@ -23,8 +23,12 @@ interface FormInputProps {
     setErrFn: (message: string) => void;
 
     formatFn?: (value: string) => string;
-    validateFn?: (value: string) => ValidationResult;
+    validateFn?: (value: string) => ValidationResult | Promise<ValidationResult>
     autoComputeFn?: (value: string) => void;
+
+    inputRef?: any;
+    fieldKey?: string;
+    setPendingAdvance: React.Dispatch<React.SetStateAction<string | null>>;
 
     showCheckbox?: boolean;
     checked?: boolean;
@@ -48,6 +52,9 @@ export default function FormInput({
     formatFn,
     validateFn,
     autoComputeFn,
+    inputRef,
+    fieldKey,
+    setPendingAdvance,
     showCheckbox = false,
     checked = false,
     onCheckChange,
@@ -58,14 +65,21 @@ export default function FormInput({
     maxLength = 100,
     maxTypableChars,
 }: FormInputProps) {
-    const showClear = !disabled && value.length > 0;
+    const showClear = !disabled && !readonly && value.length > 0;
 
     const handleChangeText = (text: string) => {
+        // limit typing
         if (maxTypableChars && text.length > maxTypableChars) {
             return;
         }
 
         setterFn(text)
+
+        const limit = maxTypableChars ?? maxLength;
+
+        if (limit && text.length >= limit) {
+            setPendingAdvance(fieldKey ?? null);
+        }
     }
 
     const handleBlur = async () => {
@@ -77,9 +91,10 @@ export default function FormInput({
             setterFn(newValue);
         }
 
-        // 2. validate
+        // 2. validate (supports sync + async)
         if (typeof validateFn === "function") {
-            const { isValid, error: errMsg } = validateFn(newValue);
+            const { isValid, error: errMsg } = await validateFn(newValue);
+
             setErrFn(isValid ? "" : errMsg || "Invalid value");
 
             // Optional: stop auto-compute if invalid
@@ -90,6 +105,9 @@ export default function FormInput({
         if (typeof autoComputeFn === "function") {
             try {
                 await autoComputeFn(newValue);
+
+                // mark that we should advance AFTER state update
+                setPendingAdvance(fieldKey ?? null);
             } catch (err) {
                 console.error("Auto-compute error:", err);
             }
@@ -114,8 +132,12 @@ export default function FormInput({
                     <Box className="flex-1">
                         <Input size="lg" isDisabled={checked || disabled} isReadOnly={readonly}>
                             <InputField
+                                ref={inputRef}
                                 value={value}
                                 onChangeText={handleChangeText}
+                                onSubmitEditing={() => setPendingAdvance(fieldKey ?? null)}
+                                returnKeyType="next"
+                                submitBehavior="submit"
                                 onBlur={handleBlur}
                                 inputMode={isAlphanumeric ? "text" : "numeric"}
                                 maxLength={maxLength}
@@ -135,17 +157,18 @@ export default function FormInput({
 
                     {/* Optional Checkbox */}
                     {showCheckbox && (
-                        <Checkbox
-                            isChecked={checked}
-                            onChange={onCheckChange}
+                        <Button
+                            size="lg"
+                            variant="solid"
+                            action="secondary"
+                            className={`px-4 border ${checked ? "bg-blue-400 border-blue-400" : "bg-white border-neutral-300"}`}
                             isDisabled={disabled}
-                            // @ts-ignore
-                            value={checkboxVal}
+                            onPress={() => onCheckChange?.(!checked)}
                         >
-                            <CheckboxIndicator size="lg" >
-                                <CheckboxIcon as={CheckIcon} />
-                            </CheckboxIndicator>
-                        </Checkbox>
+                            <ButtonText className={checked ? "text-white" : "text-gray-700"}>
+                                T
+                            </ButtonText>
+                        </Button>
                     )}
                 </Box>
 

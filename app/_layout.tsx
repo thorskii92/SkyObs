@@ -1,6 +1,6 @@
 import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
 import '@/global.css';
-import { createTCodeParameter, createTCodeTemplate, createTPsychrometric, createTSmsLogs, createTSmsRecipients, createTStations, createTSynopData, seedTStationsIfEmpty, seedTSynopDataIfEmpty, testTables } from '@/src/utils/db';
+import { clearDatabase, createTAerodrome, createTCategory, createTCodeParameter, createTCodeTemplate, createTPsychrometric, createTSmsLogs, createTSmsRecipients, createTStations, createTSynopData, seedTCategories, seedTCodeParametersIfEmpty, seedTCodeTemplatesIfEmpty, seedTPsychrometricIfEmpty, seedTStationsIfEmpty, seedTSynopDataIfEmpty, testTables } from '@/src/utils/db';
 import { Stack } from "expo-router";
 import { SQLiteProvider } from 'expo-sqlite';
 import { StatusBar } from 'expo-status-bar';
@@ -11,9 +11,15 @@ export default function RootLayout() {
     <SQLiteProvider
       databaseName='plotsdb'
       onInit={async (db) => {
+        if (__DEV__) await clearDatabase(db);
+
         await createTStations(db);
+
+        await createTCategory(db);
+
         await createTPsychrometric(db);
         await createTSynopData(db);
+        await createTAerodrome(db);
 
         await createTCodeTemplate(db);
         await createTCodeParameter(db);
@@ -22,43 +28,19 @@ export default function RootLayout() {
         await createTSmsLogs(db);
 
         await seedTStationsIfEmpty(db);
+        await seedTCategories(db);
+        await seedTPsychrometricIfEmpty(db);
         await seedTSynopDataIfEmpty(db);
+        await seedTCodeTemplatesIfEmpty(db);
+        await seedTCodeParametersIfEmpty(db);
 
-        await testTables(db);
+        if (__DEV__) await testTables(db);
       }}
     >
       <KeyboardProvider>
         <GluestackUIProvider>
-          <StatusBar
-            hidden={true}
-          />
-          <Stack screenOptions={{ headerShown: true, headerStyle: { backgroundColor: '#f9fafb' }, headerTintColor: '#333' }}>
-            <Stack.Screen
-              name="index"
-              options={{
-                title: "Home",
-                headerBackVisible: false,
-                headerShown: false,
-
-              }}
-            />
-            <Stack.Screen
-              name="datetime"
-              options={{
-                headerTitle: "New Observation",
-                headerBackButtonDisplayMode: "minimal",
-                headerShown: false,
-              }}
-            />
-            <Stack.Screen
-              name="data-collection"
-              options={{
-                headerTitle: "Data Collection",
-                headerBackButtonDisplayMode: "minimal",
-                headerShown: false,
-              }}
-            />
-          </Stack>
+          <StatusBar translucent={true} />
+          <Stack screenOptions={{ headerShown: false }} />
         </GluestackUIProvider>
       </KeyboardProvider>
     </SQLiteProvider >
