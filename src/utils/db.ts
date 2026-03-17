@@ -1420,9 +1420,16 @@ export const getLSmsLogs = async (
     },
     sortBy: string = "dateSent",
     sortOrder: "ASC" | "DESC" = "DESC"
-): Promise<any[]> => {
+): Promise<{ data: any[], total: number }> => {
     try {
-        let query = `
+        let countQuery = `
+            SELECT COUNT(*) as total
+            FROM sms_logs
+            LEFT JOIN stations ON sms_logs.stnId = stations.Id
+            WHERE 1=1
+        `;
+
+        let dataQuery = `
             SELECT
                 smsId,
                 sms_logs.stnId,
@@ -1444,54 +1451,63 @@ export const getLSmsLogs = async (
         const params: any[] = [];
 
         if (filters?.stnId) {
-            query += " AND sms_logs.stnId = ?";
+            countQuery += " AND sms_logs.stnId = ?";
+            dataQuery += " AND sms_logs.stnId = ?";
             params.push(filters.stnId);
         }
 
         if (filters?.status) {
-            query += " AND status = ?";
+            countQuery += " AND status = ?";
+            dataQuery += " AND status = ?";
             params.push(filters.status);
         }
 
         if (filters?.recip) {
-            query += " AND recip LIKE ?";
+            countQuery += " AND recip LIKE ?";
+            dataQuery += " AND recip LIKE ?";
             params.push(`%${filters.recip}%`);
         }
 
         if (filters?.dateFrom) {
-            query += " AND date(dateSent) >= date(?)";
+            countQuery += " AND date(dateSent) >= date(?)";
+            dataQuery += " AND date(dateSent) >= date(?)";
             params.push(filters.dateFrom);
         }
 
         if (filters?.dateTo) {
-            query += " AND date(dateSent) <= date(?)";
+            countQuery += " AND date(dateSent) <= date(?)";
+            dataQuery += " AND date(dateSent) <= date(?)";
             params.push(filters.dateTo);
         }
 
-        // Sorting
+        // Sorting for data query
         const validSortColumns = ["dateSent", "status", "recip", "stnId"];
         if (validSortColumns.includes(sortBy)) {
-            query += ` ORDER BY ${sortBy} ${sortOrder}`;
+            dataQuery += ` ORDER BY ${sortBy} ${sortOrder}`;
         } else {
-            query += ` ORDER BY dateSent ${sortOrder}`;
+            dataQuery += ` ORDER BY dateSent ${sortOrder}`;
         }
 
-        // Pagination
+        // Pagination for data query
         if (filters?.limit) {
-            query += " LIMIT ?";
+            dataQuery += " LIMIT ?";
             params.push(filters.limit);
         }
 
         if (filters?.offset) {
-            query += " OFFSET ?";
+            dataQuery += " OFFSET ?";
             params.push(filters.offset);
         }
 
-        const results = await db.getAllAsync(query, params);
-        return results;
+        const totalResult = await db.getFirstAsync<{ total: number }>(countQuery, params.slice(0, - (filters?.limit ? 1 : 0) - (filters?.offset ? 1 : 0)));
+        const total = totalResult?.total || 0;
+
+        const data = await db.getAllAsync(dataQuery, params);
+
+        return { data, total };
     } catch (error) {
         console.error("Error fetching SMS logs:", error);
-        return [];
+        return { data: [], total: 0 };
     }
 };
 

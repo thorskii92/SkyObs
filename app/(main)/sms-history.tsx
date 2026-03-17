@@ -48,6 +48,12 @@ export default function SmsHistoryScreen() {
     const [sortBy, setSortBy] = useState<string>("dateSent");
     const [sortOrder, setSortOrder] = useState<"ASC" | "DESC">("DESC");
 
+    // Pagination
+    const [currentPage, setCurrentPage] = useState(1);
+    const [pageSize, setPageSize] = useState(10);
+    const [totalItems, setTotalItems] = useState(0);
+    const [totalPages, setTotalPages] = useState(0);
+
     const fetchSmsLogs = async () => {
         setIsLoading(true);
         try {
@@ -56,14 +62,19 @@ export default function SmsHistoryScreen() {
             // Test the SMS logs table
             await testSmsLogsTable(db);
 
+            const offset = (currentPage - 1) * pageSize;
             const filters = {
                 status: statusFilter || undefined,
                 recip: recipientFilter || undefined,
                 dateFrom: dateFrom ? formatDate(dateFrom) : undefined,
                 dateTo: dateTo ? formatDate(dateTo) : undefined,
+                limit: pageSize,
+                offset: offset,
             };
-            const logs = await getLSmsLogs(db, filters, sortBy, sortOrder);
-            setSmsLogs(logs);
+            const result = await getLSmsLogs(db, filters, sortBy, sortOrder);
+            setSmsLogs(result.data);
+            setTotalItems(result.total);
+            setTotalPages(Math.ceil(result.total / pageSize));
         } catch (error) {
             console.error("Error fetching SMS logs:", error);
             Alert.alert("Error", "Failed to load SMS history");
@@ -73,8 +84,12 @@ export default function SmsHistoryScreen() {
     };
 
     useEffect(() => {
-        fetchSmsLogs();
+        setCurrentPage(1);
     }, [statusFilter, recipientFilter, dateFrom, dateTo, sortBy, sortOrder]);
+
+    useEffect(() => {
+        fetchSmsLogs();
+    }, [statusFilter, recipientFilter, dateFrom, dateTo, sortBy, sortOrder, currentPage, pageSize]);
 
     const showDatePicker = (type: 'from' | 'to') => {
         const currentDate = type === 'from' ? dateFrom : dateTo;
@@ -145,9 +160,7 @@ export default function SmsHistoryScreen() {
         setDateTo(null);
         setSortBy("dateSent");
         setSortOrder("DESC");
-
-        // Optional: force immediate reload
-        await fetchSmsLogs();
+        setCurrentPage(1);
     };
 
     return (
@@ -311,6 +324,38 @@ export default function SmsHistoryScreen() {
                                     </FormControl>
                                 </Box>
 
+                                <Box className="flex-row gap-2">
+                                    <FormControl className="flex-1">
+                                        <FormControlLabel>
+                                            <FormControlLabelText>Page Size</FormControlLabelText>
+                                        </FormControlLabel>
+                                        <Select
+                                            selectedValue={pageSize.toString()}
+                                            onValueChange={(value) => {
+                                                setPageSize(Number(value));
+                                                setCurrentPage(1); // Reset to first page when changing page size
+                                            }}
+                                        >
+                                            <SelectTrigger>
+                                                <SelectInput />
+                                                <SelectIcon as={ChevronDownIcon} />
+                                            </SelectTrigger>
+                                            <SelectPortal>
+                                                <SelectBackdrop />
+                                                <SelectContent>
+                                                    <SelectDragIndicatorWrapper>
+                                                        <SelectDragIndicator />
+                                                    </SelectDragIndicatorWrapper>
+                                                    <SelectItem label="5" value="5" />
+                                                    <SelectItem label="10" value="10" />
+                                                    <SelectItem label="20" value="20" />
+                                                    <SelectItem label="50" value="50" />
+                                                </SelectContent>
+                                            </SelectPortal>
+                                        </Select>
+                                    </FormControl>
+                                </Box>
+
                                 <Button onPress={clearFilters} variant="outline" size="sm">
                                     <ButtonText>Clear Filters</ButtonText>
                                 </Button>
@@ -429,6 +474,36 @@ export default function SmsHistoryScreen() {
                             setSelectedSms(null);
                         }}
                     />
+
+                    {/* Pagination */}
+                    {totalPages > 1 && (
+                        <Box className="flex-row items-center justify-between mt-4 p-4 bg-gray-50 rounded-lg">
+                            <Text className="text-sm text-gray-600">
+                                Showing {((currentPage - 1) * pageSize) + 1} to {Math.min(currentPage * pageSize, totalItems)} of {totalItems} entries
+                            </Text>
+                            <Box className="flex-row gap-2">
+                                <Button
+                                    onPress={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                                    disabled={currentPage === 1}
+                                    variant="outline"
+                                    size="sm"
+                                >
+                                    <ButtonText>Previous</ButtonText>
+                                </Button>
+                                <Text className="text-sm self-center px-2">
+                                    Page {currentPage} of {totalPages}
+                                </Text>
+                                <Button
+                                    onPress={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                                    disabled={currentPage === totalPages}
+                                    variant="outline"
+                                    size="sm"
+                                >
+                                    <ButtonText>Next</ButtonText>
+                                </Button>
+                            </Box>
+                        </Box>
+                    )}
                 </Box>
             </ScrollView>
         </SafeAreaView>

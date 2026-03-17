@@ -1,6 +1,6 @@
 import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
 import '@/global.css';
-import { clearDatabase, createTAerodrome, createTCategory, createTCodeParameter, createTCodeTemplate, createTPsychrometric, createTSmsLogs, createTSmsRecipients, createTStations, createTSynopData, seedTCategories, seedTCodeParametersIfEmpty, seedTCodeTemplatesIfEmpty, seedTPsychrometricIfEmpty, seedTStationsIfEmpty, seedTSynopDataIfEmpty, testTables } from '@/src/utils/db';
+import { createTAerodrome, createTCategory, createTCodeParameter, createTCodeTemplate, createTPsychrometric, createTSmsLogs, createTSmsRecipients, createTStations, createTSynopData, seedTCategories, seedTCodeParametersIfEmpty, seedTCodeTemplatesIfEmpty, seedTPsychrometricIfEmpty, seedTStationsIfEmpty, seedTSynopDataIfEmpty, testTables } from '@/src/utils/db';
 import { Stack } from "expo-router";
 import { SQLiteProvider } from 'expo-sqlite';
 import { StatusBar } from 'expo-status-bar';
@@ -11,7 +11,7 @@ export default function RootLayout() {
     <SQLiteProvider
       databaseName='plotsdb'
       onInit={async (db) => {
-        if (__DEV__) await clearDatabase(db);
+        // if (__DEV__) await clearDatabase(db);
 
         await createTStations(db);
 
