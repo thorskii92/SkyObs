@@ -1,40 +1,49 @@
-import { Stack } from "expo-router";
-
 import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
 import '@/global.css';
+import { createTAerodrome, createTCategory, createTCodeParameter, createTCodeTemplate, createTPsychrometric, createTSmsLogs, createTSmsRecipients, createTStations, createTSynopData, seedTCategories, seedTCodeParametersIfEmpty, seedTCodeTemplatesIfEmpty, seedTPsychrometricIfEmpty, seedTStationsIfEmpty, seedTSynopDataIfEmpty, testTables } from '@/src/utils/db';
+import { Stack } from "expo-router";
+import { SQLiteProvider } from 'expo-sqlite';
+import { StatusBar } from 'expo-status-bar';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
 
 export default function RootLayout() {
   return (
-    <GluestackUIProvider>
-      <Stack screenOptions={{ headerShown: true, headerStyle: { backgroundColor: '#f9fafb' }, headerTintColor: '#333' }}>
-        <Stack.Screen
-          name="index"
-          options={{
-            title: "Home"
-          }}
-        />
-        <Stack.Screen
-          name="datetime"
-          options={{
-            headerTitle: "New Observation",
-            headerBackButtonDisplayMode: "minimal"
-          }}
-        />
-        <Stack.Screen
-          name="data-collection1"
-          options={{
-            headerTitle: "Data Collection",
-            headerBackButtonDisplayMode: "minimal",
-          }}
-        />
-        <Stack.Screen
-          name="data-collection2"
-          options={{
-            headerTitle: "Data Collection",
-            headerBackButtonDisplayMode: "minimal",
-          }}
-        />
-      </Stack>
-    </GluestackUIProvider>
+    <SQLiteProvider
+      databaseName='plotsdb'
+      onInit={async (db) => {
+        // if (__DEV__) await clearDatabase(db);
+
+        await createTStations(db);
+
+        await createTCategory(db);
+
+        await createTPsychrometric(db);
+        await createTSynopData(db);
+        await createTAerodrome(db);
+
+        await createTCodeTemplate(db);
+        await createTCodeParameter(db);
+
+        await createTSmsRecipients(db);
+        await createTSmsLogs(db);
+
+        await seedTStationsIfEmpty(db);
+        await seedTCategories(db);
+        await seedTPsychrometricIfEmpty(db);
+        await seedTSynopDataIfEmpty(db);
+        await seedTCodeTemplatesIfEmpty(db);
+        await seedTCodeParametersIfEmpty(db);
+
+        if (__DEV__) await testTables(db);
+      }}
+    >
+      <KeyboardProvider>
+        <GluestackUIProvider>
+          <StatusBar translucent={true} />
+          <Stack screenOptions={{ headerShown: false }} />
+        </GluestackUIProvider>
+      </KeyboardProvider>
+    </SQLiteProvider >
+
   );
 }
