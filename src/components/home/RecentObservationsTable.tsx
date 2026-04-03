@@ -1,6 +1,6 @@
 import { Badge, BadgeText } from "@/components/ui/badge";
 import { Box } from "@/components/ui/box";
-import { Button, ButtonIcon } from "@/components/ui/button";
+import { Button, ButtonText } from "@/components/ui/button";
 import { Heading } from "@/components/ui/heading";
 import { Icon } from "@/components/ui/icon";
 import {
@@ -13,7 +13,7 @@ import {
 import { TableData, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Text } from "@/components/ui/text";
 import { useRouter } from "expo-router";
-import { Check, Eye, MoreVertical, Pencil, SquareDashedBottomCode } from "lucide-react-native";
+import { Check, Eye, MoreVertical, Pencil } from "lucide-react-native";
 import { useState } from "react";
 import { FlatList, Pressable, ScrollView } from "react-native";
 
@@ -38,6 +38,7 @@ interface SynopRow {
     smsMetarSent?: boolean;
     smsSynopSent?: boolean;
     smsSpeciSent?: boolean;
+    isValidated?: 0 | 1;
 }
 
 interface RecentObservationsTableProps {
@@ -112,7 +113,7 @@ export default function RecentObservationsTable({
 
                             <TableHeader className="bg-background-50">
                                 <TableRow>
-                                    <TableHead className="p-2 w-[35px] border-r border-neutral-200 bg-neutral-200" />
+                                    <TableHead className="p-2 w-[70px]" />
                                     <TableHead className="text-xs  p-2 font-medium w-[45px]">Hour</TableHead>
                                     <TableHead className="text-xs p-2 font-medium w-[90px]">Category</TableHead>
                                     <TableHead className="text-xs  p-2 font-medium w-[65px]">MSLP</TableHead>
@@ -131,10 +132,9 @@ export default function RecentObservationsTable({
                                 renderItem={({ item, index }) => (
                                     <TableRow className={index % 2 === 0 ? "bg-white" : "bg-background-50"}>
                                         {/* Code button */}
-                                        <TableData className=" py-1 pl-1 pr-2 w-[35px] border-r border-neutral-200 bg-neutral-200">
-                                            <Button size="xs" onPress={() => onGenerateCode(item)}>
-                                                <ButtonIcon as={SquareDashedBottomCode} />
-                                                {/* <ButtonText>Send Code</ButtonText> */}
+                                        <TableData className=" py-1 pl-2 pr-3 w-[70px]">
+                                            <Button size="xs" onPress={() => onGenerateCode(item)} action="secondary">
+                                                <ButtonText>Send Code</ButtonText>
                                             </Button>
                                         </TableData>
 
@@ -154,8 +154,8 @@ export default function RecentObservationsTable({
                                                         <BadgeText>{cat}</BadgeText>
                                                     </Badge>
                                                     {(cat === 'METAR' && item.smsMetarSent) ||
-                                                     (cat === 'SYNOP' && item.smsSynopSent) ||
-                                                     (cat === 'SPECI' && item.smsSpeciSent) ? (
+                                                        (cat === 'SYNOP' && item.smsSynopSent) ||
+                                                        (cat === 'SPECI' && item.smsSpeciSent) ? (
                                                         <Icon as={Check} size="xs" className="text-green-600" />
                                                     ) : null}
                                                 </Box>
@@ -200,14 +200,15 @@ export default function RecentObservationsTable({
                                                             <Icon as={Eye} size="sm" />
                                                             <Text size="sm">View</Text>
                                                         </Pressable>
-
-                                                        <Pressable
-                                                            className="flex-row items-center gap-2 p-2"
-                                                            onPress={() => { onEdit(item); closePopover(); }}
-                                                        >
-                                                            <Icon as={Pencil} size="sm" />
-                                                            <Text size="sm">Edit</Text>
-                                                        </Pressable>
+                                                        {item.isValidated === 0 && (
+                                                            <Pressable
+                                                                className="flex-row items-center gap-2 p-2"
+                                                                onPress={() => { onEdit(item); closePopover(); }}
+                                                            >
+                                                                <Icon as={Pencil} size="sm" />
+                                                                <Text size="sm">Edit</Text>
+                                                            </Pressable>
+                                                        )}
                                                     </PopoverBody>
                                                 </PopoverContent>
                                             </Popover>

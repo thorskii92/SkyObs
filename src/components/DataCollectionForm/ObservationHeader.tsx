@@ -12,11 +12,9 @@ interface ObservationHeaderProps {
 
     status: "new" | "recorded" | "validated";
 
-    onSave: () => Promise<void>;
-    onMarkQC: () => Promise<void>;
+    onAction: (mode: "save" | "update" | "qc") => Promise<boolean>;
 
     isSaving: boolean;
-    isMarkingQC: boolean;
 }
 
 const ObservationHeader = ({
@@ -24,10 +22,8 @@ const ObservationHeader = ({
     date,
     time,
     status,
-    onSave,
-    onMarkQC,
+    onAction,
     isSaving,
-    isMarkingQC,
 }: ObservationHeaderProps) => {
 
     const formattedDate = new Date(date).toLocaleDateString("en-US", {
@@ -39,7 +35,12 @@ const ObservationHeader = ({
     const saveButtonLabel = () => {
         if (status === "new") return "Save";
         if (status === "recorded") return "Update";
-        return "Save";
+        return "Saved";
+    };
+
+    const handleSavePress = () => {
+        if (status === "new") return onAction("save");
+        if (status === "recorded") return onAction("update");
     };
 
     return (
@@ -75,60 +76,50 @@ const ObservationHeader = ({
             {/* Action Buttons */}
             <Box className="flex flex-row items-center justify-center gap-2">
 
-                {/* Save */}
-                <Button
-                    className={`
-          flex-1 rounded-xl bg-white
-          active:bg-blue-50
-          focus:ring-2 focus:ring-blue-200
-          disabled:opacity-50 disabled:bg-gray-100
-          ${isSaving ? "opacity-80" : ""}
-        `}
-                    size="md"
-                    disabled={isSaving}
-                    onPress={onSave}
-                >
-                    <ButtonIcon
-                        as={Save}
-                        size="sm"
-                        className="text-blue-500 group-active:text-blue-600"
-                    />
-                    <ButtonText
-                        className="
-            font-semibold text-blue-600 text-md
-            group-active:text-blue-700
-          "
+                {/* Save / Update */}
+                {status !== "validated" && (
+                    <Button
+                        className={`
+                            flex-1 rounded-xl bg-white
+                            active:bg-blue-50
+                            disabled:opacity-50 disabled:bg-gray-100
+                            ${isSaving ? "opacity-80" : ""}
+                        `}
+                        size="md"
+                        disabled={isSaving}
+                        onPress={handleSavePress}
                     >
-                        {isSaving ? "Saving..." : saveButtonLabel()}
-                    </ButtonText>
-                </Button>
+                        <ButtonIcon
+                            as={Save}
+                            size="sm"
+                            className="text-blue-500"
+                        />
+                        <ButtonText className="font-semibold text-blue-600 text-md">
+                            {isSaving ? "Saving..." : saveButtonLabel()}
+                        </ButtonText>
+                    </Button>
+                )}
 
                 {/* Mark QC */}
                 {status === "recorded" && (
                     <Button
                         className={`
-            flex-1 rounded-xl bg-green-700
-            active:bg-green-800
-            focus:ring-2 focus:ring-green-300
-            disabled:opacity-50 disabled:bg-green-300
-            ${isMarkingQC ? "opacity-80" : ""}
-          `}
+                            flex-1 rounded-xl bg-green-700
+                            active:bg-green-800
+                            disabled:opacity-50 disabled:bg-green-300
+                            ${isSaving ? "opacity-80" : ""}
+                        `}
                         size="md"
-                        disabled={isMarkingQC}
-                        onPress={onMarkQC}
+                        disabled={isSaving}
+                        onPress={() => onAction("qc")}
                     >
-                        {!isMarkingQC && (
-                            <ButtonIcon
-                                as={ClipboardCheck}
-                                className="text-white"
-                                size="sm"
-                            />
-                        )}
-
-                        <ButtonText
-                            className="text-white font-semibold text-md"
-                        >
-                            {isMarkingQC ? "Processing..." : "Mark QC"}
+                        <ButtonIcon
+                            as={ClipboardCheck}
+                            className="text-white"
+                            size="sm"
+                        />
+                        <ButtonText className="text-white font-semibold text-md">
+                            {isSaving ? "Processing..." : "Mark QC"}
                         </ButtonText>
                     </Button>
                 )}

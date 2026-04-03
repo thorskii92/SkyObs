@@ -1,12 +1,12 @@
 import { Badge, BadgeText } from "@/components/ui/badge";
 import { Box } from "@/components/ui/box";
-import { Button, ButtonGroup, ButtonIcon, ButtonText } from "@/components/ui/button";
+import { Button, ButtonGroup, ButtonText } from "@/components/ui/button";
 import { Grid, GridItem } from "@/components/ui/grid";
 import { Heading } from "@/components/ui/heading";
 import { Icon } from "@/components/ui/icon";
 import { Pressable } from "@/components/ui/pressable";
 import { Text } from "@/components/ui/text";
-import { Check, Eye, MessageSquareCode, SquarePen } from "lucide-react-native";
+import { Check, SquarePen } from "lucide-react-native";
 import React from "react";
 
 interface SynopRow {
@@ -29,6 +29,7 @@ interface SynopRow {
     smsMetarSent?: boolean;
     smsSynopSent?: boolean;
     smsSpeciSent?: boolean;
+    isValidated?: 0 | 1;
 }
 
 interface LatestObservationCardProps {
@@ -47,6 +48,9 @@ export default function LatestObservationCard({
     const formatValue = (val: any, unit?: string) =>
         val !== undefined && val !== null ? `${val}${unit || ""}` : "-";
 
+    const isValidated = observation.isValidated === 1
+    const status = isValidated ? "Validated" : "Recorded";
+
     return (
         <Box className="p-4 bg-white border border-gray-300 rounded-xl shadow-md w-full">
             {/* Header */}
@@ -55,11 +59,29 @@ export default function LatestObservationCard({
                     <Heading className="text-base justify-center items-center">
                         {observation.sHour || "-"} | {observation.obsINT || "-"}
                     </Heading>
-                    <Badge><BadgeText>Recorded</BadgeText></Badge>
+                    <Badge
+                        className={
+                            isValidated
+                                ? "bg-green-100 border-green-300"
+                                : "bg-gray-100 border-gray-300"
+                        }
+                    >
+                        <BadgeText
+                            className={
+                                isValidated
+                                    ? "text-green-700"
+                                    : "text-gray-600"
+                            }
+                        >
+                            {status}
+                        </BadgeText>
+                    </Badge>
                 </Box>
-                <Pressable onPress={onNavigateEditScreen}>
-                    <Icon as={SquarePen} className="text-gray-500" />
-                </Pressable>
+                {!observation.isValidated && (
+                    <Pressable onPress={onNavigateEditScreen}>
+                        <Icon as={SquarePen} className="text-gray-500" />
+                    </Pressable>
+                )}
             </Box>
 
             {/* Remark */}
@@ -156,8 +178,8 @@ export default function LatestObservationCard({
                                 <BadgeText>{cat}</BadgeText>
                             </Badge>
                             {(cat === 'METAR' && observation.smsMetarSent) ||
-                             (cat === 'SYNOP' && observation.smsSynopSent) ||
-                             (cat === 'SPECI' && observation.smsSpeciSent) ? (
+                                (cat === 'SYNOP' && observation.smsSynopSent) ||
+                                (cat === 'SPECI' && observation.smsSpeciSent) ? (
                                 <Icon as={Check} size="xs" className="text-green-600" />
                             ) : null}
                         </Box>
@@ -174,7 +196,6 @@ export default function LatestObservationCard({
                         onPress={onGenerateCode}
                         className="min-w-24 text-center"
                     >
-                        <ButtonIcon as={MessageSquareCode} />
                         <ButtonText className="text-sm font-medium">Send Code</ButtonText>
                     </Button>
                     <Button
@@ -185,7 +206,6 @@ export default function LatestObservationCard({
                         className="min-w-24 bg-blue-400"
                     >
                         <ButtonText>View Data</ButtonText>
-                        <ButtonIcon as={Eye} />
                     </Button>
                 </ButtonGroup>
             </Box>

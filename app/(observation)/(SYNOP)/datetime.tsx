@@ -21,8 +21,9 @@ import { Spinner } from "@/components/ui/spinner";
 import { Text } from "@/components/ui/text";
 import TimePicker from "@/src/components/DateTime/TimePicker";
 import GlobalLoading from "@/src/components/GlobalLoading";
+import { useUser } from "@/src/context/UserContext";
 import { Station } from "@/src/models/station";
-import { API_URL, getStations } from "@/src/utils/api";
+import { checkApiConnection, getStations } from "@/src/utils/api";
 import { getDB, getLStations, getLSynopData } from "@/src/utils/db";
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { router } from "expo-router";
@@ -35,6 +36,7 @@ interface HourType {
 }
 
 export default function DateTime() {
+    const { user } = useUser();
     const [isLoading, setIsLoading] = useState<boolean>(true);
     const [stations, setStations] = useState<Station[]>([]);
     const [station, setStation] = useState<Station | null>(null);
@@ -125,23 +127,6 @@ export default function DateTime() {
             }
         };
 
-        const checkAPI = async () => {
-            try {
-                const controller = new AbortController();
-                const timeout = setTimeout(() => controller.abort(), 3000);
-
-                const response = await fetch(API_URL, {
-                    method: "HEAD",
-                    signal: controller.signal,
-                });
-
-                clearTimeout(timeout);
-                return response.ok;
-            } catch {
-                return false;
-            }
-        };
-
         const fetchStations = async () => {
             setIsLoading(true);
 
@@ -154,7 +139,8 @@ export default function DateTime() {
 
                 if (hasInternet) {
                     console.log("Internet available. Checking API...");
-                    const apiReachable = await checkAPI();
+                    const apiReachable = await checkApiConnection();
+                    console.log("result:", apiReachable)
                     if (apiReachable) {
                         console.log("API reachable. Will sync.");
                         shouldSync = true;
@@ -180,7 +166,8 @@ export default function DateTime() {
                 setStations(localStations);
 
                 const defaultStation =
-                    localStations.find((s) => s.Id === 1) || null;
+                    localStations.find((s) => s.Id === user?.station_id) ||
+                    null;
                 setStation(defaultStation);
 
                 const initialTime = await getCurrentUTCXX00(defaultStation?.Id, date);
@@ -289,7 +276,14 @@ export default function DateTime() {
                             }}
                         >
                             <SelectTrigger className="flex justify-between" variant="outline" size="md">
-                                <SelectInput value={`${station?.wmoID}${station?.stationID} - ${station?.stnName}`} placeholder="Select station" />
+                                <SelectInput
+                                    value={
+                                        station
+                                            ? `${station.wmoID}${station.stationID} - ${station.stnName}`
+                                            : undefined
+                                    }
+                                    placeholder="Select station"
+                                />
                                 <SelectIcon className="absolute right-3" as={ChevronDownIcon} />
                             </SelectTrigger>
 

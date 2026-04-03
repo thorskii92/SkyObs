@@ -236,7 +236,7 @@ export default function DataCollectionScreen() {
         AltPres: "",
         pastW: "",
         Supplemental: "",
-        remarks: "",
+        Remarks: "",
         Signature: "",
         ATS: "",
     });
@@ -258,18 +258,11 @@ export default function DataCollectionScreen() {
 
                 if (!synop) return;
 
-                console.log("VV:", synop[0]?.VV);
-                console.log("Synop:", synop);
-                console.log(synop[0]?.VV != null
-                    ? synop[0].VV >= 10
-                        ? "9999"
-                        : `${Number(synop[0].VV)}000`
-                    : "")
                 setFormData((prev) => ({
                     ...prev,
-                    wDir: synop[0]?.wDir?.toString() ?? "",
+                    wDir: synop[0]?.wDir?.toString().padStart(3, "0") ?? "",
                     wSpd: synop[0]?.wSpd != null
-                        ? (synop[0].wSpd * 2).toString().padStart(2, "0")
+                        ? (synop[0].wSpd * 2).toString().padStart(2, "0").slice(1)
                         : "",
                     VV: synop[0]?.VV?.toString() ?? "",
                     PresVV: synop[0]?.VV != null
@@ -305,6 +298,7 @@ export default function DataCollectionScreen() {
                         ? Math.floor(synop[0].altP).toString()
                         : "",
                     pastW: `${synop[0]?.pastW1 ?? ""}${synop[0]?.pastW2 ?? ""}`,
+                    Remarks: synop[0]?.remark,
                     Signature: synop[0]?.obsINT ?? "",
                 }));
             } catch (err) {
@@ -862,10 +856,10 @@ export default function DataCollectionScreen() {
                         <Heading size="md" className="mb-2">Remarks</Heading>
                         <Textarea className="rounded" size="md">
                             <TextareaInput
-                                value={formData.remarks}
+                                value={formData.Remarks}
                                 className="font-bold"
                                 onChangeText={(text) =>
-                                    setFormData((prev) => ({ ...prev, remarks: text }))
+                                    setFormData((prev) => ({ ...prev, Remarks: text }))
                                 }
                             />
                         </Textarea>
@@ -889,22 +883,6 @@ export default function DataCollectionScreen() {
                                 </Input>
                                 <Text size="xs" italic className="text-center">
                                     OBS SIG
-                                </Text>
-                            </FormControl>
-                            <FormControl className="flex-1 gap-2">
-                                <Input variant="outline" size="md">
-                                    <InputField
-                                        placeholder="ATS's Signature"
-                                        value={formData.ATS}
-                                        maxLength={10}
-                                        className="text-center font-bold"
-                                        onChangeText={(text) =>
-                                            setFormData((prev) => ({ ...prev, ATS: text }))
-                                        }
-                                    />
-                                </Input>
-                                <Text size="xs" italic className="text-center">
-                                    ATS SIG
                                 </Text>
                             </FormControl>
                         </Box>

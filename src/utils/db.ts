@@ -1,8 +1,6 @@
-import psychrometricJSON from "@/assets/seeds/psychrometric.json";
-import stationsJSON from "@/assets/seeds/stations.json";
-import synopDataJSON from "@/assets/seeds/synop_data.json";
 import * as SQLite from "expo-sqlite";
 import { Station } from "../models/station";
+import { API_URL, getStations, getSynopData } from "./api";
 
 export const DB_NAME = "plotsdb"
 
@@ -271,7 +269,7 @@ export const createTCodeTemplate = async (db: SQLite.SQLiteDatabase) => {
                 codeID INTEGER PRIMARY KEY AUTOINCREMENT,
                 stnID INTEGER,
                 cID INTEGER,
-                hour TEXT NOT NULL, -- if specific
+                hour TEXT, -- if specific
                 uID INTEGER,
                 Template TEXT,
                 tType TEXT, -- General | Specific
@@ -346,7 +344,9 @@ export const createTSmsRecipients = async (db: SQLite.SQLiteDatabase) => {
                 date_updated TEXT,
 
                 FOREIGN KEY (stnId) REFERENCES stations(Id),
-                FOREIGN KEY (cID) REFERENCES category(cID)
+                FOREIGN KEY (cID) REFERENCES category(cID),
+
+                UNIQUE (num, name, cID)  -- ensures each recipient + name + category is unique
             );
         `);
 
@@ -358,7 +358,6 @@ export const createTSmsRecipients = async (db: SQLite.SQLiteDatabase) => {
     }
 };
 
-// TODO: add category column
 export const createTSmsLogs = async (db: SQLite.SQLiteDatabase) => {
     try {
         await db.execAsync(`
@@ -366,24 +365,35 @@ export const createTSmsLogs = async (db: SQLite.SQLiteDatabase) => {
                 smsId INTEGER PRIMARY KEY AUTOINCREMENT,
                 stnId INTEGER,
                 uId INTEGER,
-                sId INTEGER,                    -- Foreign key to synop_data.sID
-                metId INTEGER,                  -- Foreign key to aerodrome.metID
-                status TEXT NOT NULL,          -- e.g., "success", "failed", "pending"
-                msg TEXT NOT NULL,
-                recip TEXT NOT NULL,
-                dateSent TEXT DEFAULT (datetime('now')),
-                channel TEXT DEFAULT 'skyobs',    
 
-                UNIQUE(recip, dateSent),
-                FOREIGN KEY (stnId) REFERENCES stations(Id),
-                FOREIGN KEY (sId) REFERENCES synop_data(sID),
-                FOREIGN KEY (metId) REFERENCES aerodrome(metID)
+                category TEXT NOT NULL,
+                status TEXT NOT NULL,
+                msg TEXT NOT NULL,
+
+                recip_num TEXT NOT NULL,
+                recip_name TEXT,
+
+                obsDate TEXT NOT NULL,                 -- YYYY-MM-DD
+                obsHour TEXT NOT NULL,                 -- ✅ "HH00" format (e.g., "1300")
+
+                dateSent TEXT DEFAULT (datetime('now')),
+
+                channel TEXT DEFAULT 'skyobs',
+
+                UNIQUE(recip_num, obsDate, obsHour, category),
+
+                FOREIGN KEY (stnId) REFERENCES stations(Id)
             );
         `);
 
         await db.execAsync(`
             CREATE INDEX IF NOT EXISTS idx_sms_logs_station
             ON sms_logs (stnId);
+        `);
+
+        await db.execAsync(`
+            CREATE INDEX IF NOT EXISTS idx_sms_logs_category
+            ON sms_logs (category);
         `);
 
         await db.execAsync(`PRAGMA foreign_keys = ON;`);
@@ -528,7 +538,7 @@ export const getLSynopData = async (
         }
 
         if (sDate) {
-            query += ` AND sDate = ?`;
+            query += ` AND sDate LIKE ? || '%'`;
             params.push(sDate);
         }
 
@@ -538,11 +548,145 @@ export const getLSynopData = async (
 
         query += ` ORDER BY ${sortBy} ${sortOrder}`;
 
+        console.log(query)
         const synopData = await db.getAllAsync(query, params);
         return synopData;
     } catch (error) {
         console.error("Error fetching local synoptic data:", error);
         return [];
+    }
+};
+
+export const upsertSynopData = async (
+    db: SQLite.WebSQLDatabase | SQLite.SQLiteDatabase,
+    data: Record<string, any>
+) => {
+    try {
+        const { stnID, sDate, sHour } = data;
+
+        if (!stnID || !sDate || !sHour) {
+            console.error("Missing required keys: stnID, sDate, sHour", data);
+            return;
+        }
+
+        const sql = `
+            INSERT INTO synop_data (
+                uID, stnID, sDate, sHour, sActualDateTime,
+                heightLL, VV, SummTotal, wDir, wSpd,
+                dBulb, wBulb, dPoiint, RH, stnP, mslP, altP,
+                tendency, net3hr, vaporP, RR, tR, presW,
+                pastW1, pastW2, amtLC,
+                amtFirstLayer, typeFirstLayer, heightFirstLayer,
+                amtSecondLayer, typeSecondLayer, heightSecondLayer,
+                amtThirdLayer, typeThirdLayer, heightThirdLayer,
+                amtFourthLayer, typeFourthLayer, heightFourthLayer,
+                ceiling, stateOfSea, seaDir, seaPer, seaHeight,
+                maxTemp, minTemp, pres24, remark, obsINT,
+                pAttachTherm, pObsBaro, pCorrection, pBarograph, pBaroCorrection,
+                summaryDate, dirLow, dirMid, dirHigh, isValidated
+            )
+            VALUES (${Array(58).fill("?").join(", ")})
+            ON CONFLICT(stnID, sDate, sHour)
+            DO UPDATE SET
+                VV = excluded.VV,
+                wDir = excluded.wDir,
+                wSpd = excluded.wSpd,
+                dBulb = excluded.dBulb,
+                wBulb = excluded.wBulb,
+                dPoiint = excluded.dPoiint,
+                RH = excluded.RH,
+                stnP = excluded.stnP,
+                mslP = excluded.mslP,
+                altP = excluded.altP,
+                tendency = excluded.tendency,
+                net3hr = excluded.net3hr,
+                vaporP = excluded.vaporP,
+                RR = excluded.RR,
+                pres24 = excluded.pres24,
+                remark = excluded.remark;
+        `;
+
+        const values = [
+            data.uID,
+            data.stnID,
+            data.sDate,
+            data.sHour,
+            data.sActualDateTime,
+
+            data.heightLL,
+            data.VV,
+            data.SummTotal,
+            data.wDir,
+            data.wSpd,
+
+            data.dBulb,
+            data.wBulb,
+            data.dPoiint,
+            data.RH,
+            data.stnP,
+            data.mslP,
+            data.altP,
+
+            data.tendency,
+            data.net3hr,
+            data.vaporP,
+            data.RR,
+            data.tR,
+            data.presW,
+
+            data.pastW1,
+            data.pastW2,
+            data.amtLC,
+
+            data.amtFirstLayer,
+            data.typeFirstLayer,
+            data.heightFirstLayer,
+
+            data.amtSecondLayer,
+            data.typeSecondLayer,
+            data.heightSecondLayer,
+
+            data.amtThirdLayer,
+            data.typeThirdLayer,
+            data.heightThirdLayer,
+
+            data.amtFourthLayer,
+            data.typeFourthLayer,
+            data.heightFourthLayer,
+
+            data.ceiling,
+            data.stateOfSea,
+            data.seaDir,
+            data.seaPer,
+            data.seaHeight,
+
+            data.maxTemp,
+            data.minTemp,
+            data.pres24,
+            data.remark,
+            data.obsINT,
+
+            data.pAttachTherm,
+            data.pObsBaro,
+            data.pCorrection,
+            data.pBarograph,
+            data.pBaroCorrection,
+
+            data.summaryDate,
+            data.dirLow,
+            data.dirMid,
+            data.dirHigh,
+
+            0 // isValidated default
+        ];
+
+        await db.runAsync(sql, values);
+
+        console.log(`Upserted synop_data for station ${stnID} on ${sDate} at ${sHour}`);
+
+    } catch (err) {
+        console.error("Error upserting synop_data:", err);
+        console.error("DATA:", data);
     }
 };
 
@@ -565,7 +709,7 @@ export const getLObservedData = async (
                 params.push(sHour);
             }
             if (sDate) {
-                conditions.push("sd.sDate = ?");
+                conditions.push("sd.sDate LIKE ? || '%'");
                 params.push(sDate);
             }
 
@@ -591,7 +735,7 @@ export const getLObservedData = async (
                 aeroParams.push(sHour);
             }
             if (sDate) {
-                aeroConditions.push("a.sDate = ?");
+                aeroConditions.push("a.sDate LIKE ? || '%'");
                 aeroParams.push(sDate);
             }
 
@@ -820,6 +964,21 @@ export const getLCodeParams = async (db: SQLite.SQLiteDatabase, stnID: string, c
     }
 }
 
+export const getLCategories = async (db: SQLite.SQLiteDatabase) => {
+    try {
+        const result = await db.getAllAsync(`
+            SELECT cID, cName
+            FROM category
+            ORDER BY cID
+        `);
+
+        return result;
+    } catch (error) {
+        console.error("Error fetching categories:", error);
+        return [];
+    }
+};
+
 // SEEDERS
 export const seedTStationsIfEmpty = async (
     db: SQLite.SQLiteDatabase
@@ -834,22 +993,31 @@ export const seedTStationsIfEmpty = async (
             return;
         }
 
-        console.log("Seeding stations table...");
+        console.log("Fetching stations from API...");
+
+        const stations = await getStations();
+
+        if (!stations || stations.length === 0) {
+            console.warn("No stations fetched from API.");
+            return;
+        }
+
+        console.log(`Seeding ${stations.length} stations...`);
 
         await withTransaction(db, async (tx) => {
-            for (const station of stationsJSON) {
+            for (const station of stations) {
                 await tx.runAsync(
                     `
-          INSERT INTO stations (
-            wmoID, stationID, ICAO, stnName,
-            Latitude, Longitude, height, mslCor, altCor,
-            Synoptic, UpperAir, Aeromet, Agromet,
-            Hydromet, Radar, isRegionOffice,
-            PRSD, LatDef, LonDef,
-            Station, Town, Province, ElevationFt
-          )
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-          `,
+                    INSERT INTO stations (
+                        wmoID, stationID, ICAO, stnName,
+                        Latitude, Longitude, height, mslCor, altCor,
+                        Synoptic, UpperAir, Aeromet, Agromet,
+                        Hydromet, Radar, isRegionOffice,
+                        PRSD, LatDef, LonDef,
+                        Station, Town, Province, ElevationFt
+                    )
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    `,
                     [
                         station.wmoID,
                         station.stationID,
@@ -879,55 +1047,9 @@ export const seedTStationsIfEmpty = async (
             }
         });
 
-        console.log("Stations seeded successfully.");
+        console.log("Stations seeded successfully from API.");
     } catch (error) {
         console.error("Error seeding stations:", error);
-    }
-};
-
-// SEEDER
-export const seedTPsychrometricIfEmpty = async (
-    db: SQLite.SQLiteDatabase
-) => {
-    try {
-        const result = await db.getFirstAsync<{ count: number }>(
-            `SELECT COUNT(*) as count FROM psychrometric`
-        );
-
-        if (result && result.count > 0) {
-            console.log("Psychrometric table already seeded.");
-            return;
-        }
-
-        console.log("Seeding psychrometric table...");
-
-        await withTransaction(db, async (tx) => {
-            for (const item of psychrometricJSON) {
-                await tx.runAsync(
-                    `
-                    INSERT OR IGNORE INTO psychrometric (
-                        dBulb,
-                        wBulb,
-                        dPoint,
-                        RH,
-                        vPressure
-                    )
-                    VALUES (?, ?, ?, ?, ?)
-                    `,
-                    [
-                        item.dBulb ?? null,
-                        item.wBulb ?? null,
-                        item.dPoint ?? null,
-                        item.RH ?? null,
-                        item.vPressure ?? null,
-                    ]
-                );
-            }
-        });
-
-        console.log("Psychrometric table seeded successfully.");
-    } catch (error) {
-        console.error("Error seeding psychrometric table:", error);
     }
 };
 
@@ -944,377 +1066,220 @@ export const seedTSynopDataIfEmpty = async (
             return;
         }
 
-        console.log("Seeding synop_data table...");
+        console.log("Fetching synop data from API (last 1 month)...");
+
+        // 👉 Compute last 1 month range dynamically
+        const now = new Date();
+        const oneMonthAgo = new Date();
+        oneMonthAgo.setMonth(now.getMonth() - 1);
+
+        // Format as YYYY-MM-DD
+        const startDate = oneMonthAgo.toISOString().split('T')[0];
+        const endDate = now.toISOString().split('T')[0];
+
+        // Fetch all pages
+        let synopData: any[] = [];
+        let page = 1;
+        let totalPages = 1;
+
+        do {
+            const { results, pagination } = await getSynopData({
+                startDate,
+                endDate,
+                page,
+                limit: 500,
+                sortBy: 'sDate',
+                sortOrder: 'desc'
+            });
+
+            synopData = [...synopData, ...results];
+            totalPages = pagination?.totalPages || 1;
+            page++;
+        } while (page <= totalPages);
+
+        if (synopData.length === 0) {
+            console.warn("No synop data fetched for the last month.");
+            return;
+        }
+
+        console.log(`Seeding ${synopData.length} synop records...`);
 
         await withTransaction(db, async (tx) => {
-            for (const obs of synopDataJSON) {
+            for (const obs of synopData) {
                 await tx.runAsync(
                     `
-          INSERT INTO synop_data (
-            sID, uID, stnID, sDate, sHour, sActualDateTime,
-            heightLL, VV, SummTotal, wDir, wSpd,
-            dBulb, wBulb, dPoiint, RH,
-            stnP, mslP, altP, tendency, net3hr,
-            vaporP, RR, tR, presW, pastW1, pastW2,
-            amtLC,
-            amtFirstLayer, typeFirstLayer, heightFirstLayer,
-            amtSecondLayer, typeSecondLayer, heightSecondLayer,
-            amtThirdLayer, typeThirdLayer, heightThirdLayer,
-            amtFourthLayer, typeFourthLayer, heightFourthLayer,
-            ceiling,
-            stateOfSea, seaDir, seaPer, seaHeight,
-            maxTemp, minTemp, pres24,
-            remark, obsINT,
-            pAttachTherm, pObsBaro, pCorrection,
-            pBarograph, pBaroCorrection,
-            summaryDate,
-            dirLow, dirMid, dirHigh
-          )
-          VALUES (
-            ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?,
-            ?, ?, ?, ?,
-            ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?,
-            ?,
-            ?, ?, ?,
-            ?, ?, ?,
-            ?, ?, ?,
-            ?, ?, ?,
-            ?,
-            ?, ?, ?, ?,
-            ?, ?, ?,
-            ?, ?,
-            ?, ?, ?,
-            ?, ?,
-            ?,
-            ?, ?, ?
-          )
-          `,
+                    INSERT OR REPLACE INTO synop_data (
+                        uID, stnID, sDate, sHour, sActualDateTime,
+                        heightLL, VV, SummTotal, wDir, wSpd,
+                        dBulb, wBulb, dPoiint, RH,
+                        stnP, mslP, altP, tendency, net3hr,
+                        vaporP, RR, tR, presW, pastW1, pastW2,
+                        amtLC,
+                        amtFirstLayer, typeFirstLayer, heightFirstLayer,
+                        amtSecondLayer, typeSecondLayer, heightSecondLayer,
+                        amtThirdLayer, typeThirdLayer, heightThirdLayer,
+                        amtFourthLayer, typeFourthLayer, heightFourthLayer,
+                        ceiling,
+                        stateOfSea, seaDir, seaPer, seaHeight,
+                        maxTemp, minTemp, pres24,
+                        remark, obsINT,
+                        pAttachTherm, pObsBaro, pCorrection,
+                        pBarograph, pBaroCorrection,
+                        summaryDate,
+                        dirLow, dirMid, dirHigh
+                    )
+                    VALUES (${Array(57).fill("?").join(",")})
+                    `,
                     [
-                        obs.sID,
                         obs.uID,
                         obs.stnID,
                         obs.sDate,
                         obs.sHour,
-                        obs.sActualDateTime || null,
-
+                        obs.sActualDateTime ?? null,
                         obs.heightLL ?? null,
                         obs.VV ?? null,
                         obs.SummTotal ?? null,
                         obs.wDir ?? null,
                         obs.wSpd ?? null,
-
                         obs.dBulb ?? null,
                         obs.wBulb ?? null,
                         obs.dPoiint ?? null,
                         obs.RH ?? null,
-
                         obs.stnP ?? null,
                         obs.mslP ?? null,
                         obs.altP ?? null,
                         obs.tendency ?? null,
                         obs.net3hr ?? null,
-
                         obs.vaporP ?? null,
                         obs.RR ?? null,
                         obs.tR ?? null,
                         obs.presW ?? null,
                         obs.pastW1 ?? null,
                         obs.pastW2 ?? null,
-
                         obs.amtLC ?? null,
-
                         obs.amtFirstLayer ?? null,
                         obs.typeFirstLayer ?? null,
                         obs.heightFirstLayer ?? null,
-
                         obs.amtSecondLayer ?? null,
                         obs.typeSecondLayer ?? null,
                         obs.heightSecondLayer ?? null,
-
                         obs.amtThirdLayer ?? null,
                         obs.typeThirdLayer ?? null,
                         obs.heightThirdLayer ?? null,
-
                         obs.amtFourthLayer ?? null,
                         obs.typeFourthLayer ?? null,
                         obs.heightFourthLayer ?? null,
-
                         obs.ceiling ?? null,
-
-                        obs.stateOfSea || null,
+                        obs.stateOfSea ?? null,
                         obs.seaDir ?? null,
                         obs.seaPer ?? null,
                         obs.seaHeight ?? null,
-
                         obs.maxTemp ?? null,
                         obs.minTemp ?? null,
                         obs.pres24 ?? null,
-
-                        obs.remark || null,
-                        obs.obsINT || null,
-
+                        obs.remark ?? null,
+                        obs.obsINT ?? null,
                         obs.pAttachTherm ?? null,
                         obs.pObsBaro ?? null,
                         obs.pCorrection ?? null,
-
                         obs.pBarograph ?? null,
                         obs.pBaroCorrection ?? null,
-
-                        obs.summaryDate || null,
-
-                        obs.dirLow || null,
-                        obs.dirMid || null,
-                        obs.dirHigh || null,
+                        obs.summaryDate ?? null,
+                        obs.dirLow ?? null,
+                        obs.dirMid ?? null,
+                        obs.dirHigh ?? null,
                     ]
                 );
             }
         });
 
-        console.log("Synoptic data seeded successfully.")
-    } catch (error) {
-        console.error("Error seeding synoptic data:", error);
-    }
-}
-
-export const seedTCodeTemplatesIfEmpty = async (db: SQLite.SQLiteDatabase) => {
-    try {
-        const synop = await db.getFirstAsync<{ cID: number }>(`
-            SELECT cID FROM category
-            WHERE cName='SYNOP'
-        `);
-
-        if (!synop) {
-            console.warn("SYNOP category not found. Skipping template seeding.");
-            return;
-        }
-
-        console.log("Seeding SYNOP templates (Main / Intermediate / Hourly)...");
-
-        // =========================
-        // BASE TEMPLATES
-        // =========================
-
-        const MIDNIGHT_TEMPLATE = `
-SMPH01 :ICAO: :YY::GG:00
-AAXX :YY::GG:1
-:WMOSTN: :iR::Ix::H::VV: :N::ddd::fff: 10:TTT: 20:TdTdTd: 3:STNP: 4:PPPP: 5:a::ppp: :RR24: :WEATHER: :CLOUD: 333 :TMIN: :SUNSHINE: 56:dddL::dddM::dddH: :P24: :RR24: :CGROUP: :GROUP555: :MONTHLYRR:= :WEEKLYRR::RMK::INI:
-`.trim();
-
-        const MAIN_TEMPLATE = `
-SMPH01 :ICAO: :YY::GG:00
-AAXX :YY::GG:1
-:WMOSTN: :iR::Ix::H::VV: :N::ddd::fff: 10:TTT: 20:TdTdTd: 3:STNP: 4:PPPP: 5:a::ppp: :RRRR: :RAIN: :WEATHER: :CLOUD: 333 :P24: :CGROUP: = :RMK::INI:
-`.trim();
-
-        const INTERMEDIATE_TEMPLATE = `
-SIPH20 :ICAO: :YY::GG:00
-AAXX :YY::GG:1
-:WMOSTN: :iR::Ix::H::VV: :N::ddd::fff: 10:TTT: 20:TdTdTd: 3:STNP: 4:PPPP: 5:a::ppp: :RAIN: :WEATHER: :CLOUD: 333 56:dddL::dddM::dddH: :CGROUP: = :RMK::INI:
-`.trim();
-
-        const HOURLY_TEMPLATE = `
-SNPH20 :ICAO: :YY::GG:00
-AAXX :YY::GG:1
-:WMOSTN: :iR::Ix::H::VV: :N::ddd::fff: 10:TTT: 20:TdTdTd: 3:STNP: 4:PPPP: 5//// :WEATHER: :CLOUD: 333 56:dddL::dddM::dddH: :CGROUP: = :RMK::INI:
-`.trim();
-
-        const mainHours = ["06", "12", "18"];
-        const intermediateHours = ["03", "09", "15", "21"];
-
-        const hours = Array.from({ length: 24 }, (_, i) =>
-            i.toString().padStart(2, "0")
-        );
-
-        await withTransaction(db, async (tx) => {
-            for (const hour of hours) {
-
-                let templateToUse = HOURLY_TEMPLATE;
-
-                // Midnight template
-                if (hour === "00") {
-                    templateToUse = MIDNIGHT_TEMPLATE;
-                }
-                // Main synoptic hours
-                else if (mainHours.includes(hour)) {
-                    templateToUse = MAIN_TEMPLATE;
-                }
-                // Intermediate hours
-                else if (intermediateHours.includes(hour)) {
-                    templateToUse = INTERMEDIATE_TEMPLATE;
-                }
-
-                await tx.execAsync(`
-                    INSERT OR REPLACE INTO codetemplate (stnID, cID, hour, Template, tType)
-                    VALUES (
-                        1,
-                        ${synop?.cID},
-                        '${hour}',
-                        '${templateToUse.replace(/'/g, "''")}',
-                        "Specific"
-                    );
-                `);
-            }
-        });
-
-        console.log("SYNOP templates seeded successfully.");
-
-        // =========================
-        // MorS GENERAL TEMPLATE FOR METAR & SPECI
-        // =========================
-        const morsCategories = await db.getAllAsync<{ cID: number }>(`
-            SELECT cID FROM category
-            WHERE cName IN ('METAR', 'SPECI')
-        `);
-
-        if (morsCategories?.length) {
-            const morsTemplate = `
-:MorS: :CCCC: :YY::GGgg:Z :SW: :VVVV: :PRESWX: :CLOUD: :TD: :AP: :SUP: :REMARKS: :OBSSIG: :ATSSIG:
-`.trim();
-
-            await withTransaction(db, async (tx) => {
-                for (const cat of morsCategories) {
-                    // Insert MorS general template unconditionally with OR IGNORE
-                    await tx.execAsync(`
-                        INSERT OR REPLACE INTO codetemplate (stnID, cID, hour, Template, tType)
-                        VALUES (1, ${cat.cID}, '00', '${morsTemplate.replace(/'/g, "''")}', 'General');
-                    `);
-                }
-            });
-
-            console.log("MorS general template seeded for METAR & SPECI.");
-        }
-
+        console.log("Synop data seeded successfully.");
 
     } catch (error) {
-        console.error("Error seeding Code templates:", error);
+        console.error("Error seeding synop data:", error);
     }
 };
 
-export const seedTCodeParametersIfEmpty = async (db: SQLite.SQLiteDatabase) => {
+export const seedTCodeTemplatesIfEmpty = async (db: SQLite.SQLiteDatabase) => {
     try {
-        const synop = await db.getFirstAsync<{ cID: number }>(`
-            SELECT cID FROM category
-            WHERE cName='SYNOP'
+        const existing = await db.getFirstAsync<{ count: number }>(`
+            SELECT COUNT(*) as count FROM codetemplate
         `);
 
-        if (!synop) {
-            console.warn("SYNOP category not found. Skipping parameter seeding.");
+        if (existing && existing.count > 0) {
+            console.log("Codetemplate already seeded.");
             return;
         }
 
-        // Get METAR and SPECI categories
-        const morsCat = await db.getAllAsync<{ cID: number; cName: string }>(`
-            SELECT cID, cName FROM category
-            WHERE cName IN ('METAR', 'SPECI')
-        `);
+        console.log("Fetching codetemplates from API...");
 
-        if (!morsCat || morsCat.length === 0) {
-            console.warn("METAR/SPECI categories not found.");
-            return;
-        }
-
-        const synopCols = [
-            { varname: "Station ID / WMO ID", var: "wmostn", par: ":WMOSTN:" },
-            { varname: "ICAO Station ID", var: "ICAO", par: ":ICAO:" },
-            { varname: "Date", var: "sDate", par: ":YY:" },
-            { varname: "Hour", var: "sHour", par: ":GG:" },
-            { varname: "Lower Level Height", var: "heightLL", par: ":H:" },
-            { varname: "Visibility", var: "VV", par: ":VV:" },
-            { varname: "Summation Total", var: "SummTotal", par: ":N:" },
-            { varname: "Wind Indicator", var: "wIndc", par: ":iw:" },
-            { varname: "Wind Direction", var: "wDir", par: ":ddd:" },
-            { varname: "Wind Speed", var: "wSpd", par: ":fff:" },
-            { varname: "Dry Bulb Temperature", var: "dBulb", par: ":TTT:" },
-            { varname: "Dew Point", var: "dPoiint", par: ":TdTdTd:" },
-            { varname: "Station Pressure", var: "stnP", par: ":STNP:" },
-            { varname: "MSL Pressure", var: "mslP", par: ":PPPP:" },
-            { varname: "Tendency", var: "tendency", par: ":a:" },
-            { varname: "Net 3-Hr Pressure Change", var: "net3hr", par: ":ppp:" },
-            { varname: "Amount of Rainfall", var: "RR", par: ":RRRR:" },
-            { varname: "Duration of Rainfall", var: "tR", par: ":TR:" },
-            { varname: "Rain Indicator", var: "rainIndc", par: ":iR:" },
-            { varname: "Indicator of Weather Phenomena", var: "wpIndc", par: ":Ix:" },
-            { varname: "Present Weather", var: "presW", par: ":ww:" },
-            { varname: "Past Weather 1", var: "pastW1", par: ":W1:" },
-            { varname: "Past Weather 2", var: "pastW2", par: ":W2:" },
-            { varname: "Total Amount of Low Clouds", var: "amtLC", par: ":Nh:" },
-            { varname: "Amount of First Layer", var: "amtFirstLayer", par: ":A1:" },
-            { varname: "Type of First Layer", var: "typeFirstLayer", par: ":T1:" },
-            { varname: "Height of First Layer", var: "heightFirstLayer", par: ":H1:" },
-            { varname: "Amount of Second Layer", var: "amtSecondLayer", par: ":A2:" },
-            { varname: "Type of Second Layer", var: "typeSecondLayer", par: ":T2:" },
-            { varname: "Height of Second Layer", var: "heightSecondLayer", par: ":H2:" },
-            { varname: "Amount of Third Layer", var: "amtThirdLayer", par: ":A3:" },
-            { varname: "Type of Third Layer", var: "typeThirdLayer", par: ":T3:" },
-            { varname: "Height of Third Layer", var: "heightThirdLayer", par: ":H3:" },
-            { varname: "Amount of Fourth Layer", var: "amtFourthLayer", par: ":A4:" },
-            { varname: "Type of Fourth Layer", var: "typeFourthLayer", par: ":T4:" },
-            { varname: "Height of Fourth Layer", var: "heightFourthLayer", par: ":H4:" },
-            { varname: "Ceiling", var: "ceiling", par: ":CEIL:" },
-            { varname: "Max Temperature", var: "maxTemp", par: ":Tx:" },
-            { varname: "Min Temperature", var: "minTemp", par: ":Tn:" },
-            { varname: "24-Hour Pressure Change", var: "pres24", par: ":P24:" },
-            { varname: "Remark", var: "remark", par: ":RMK:" },
-            { varname: "Observer Initials", var: "obsINT", par: ":INI:" },
-
-            // NEW PARAMETERS for templates
-            { varname: "Hourly Rain", var: "rainHourly", par: ":RAIN:" },
-            { varname: "Weather Group", var: "weatherGroup", par: ":WEATHER:" },
-            { varname: "Cloud Group", var: "cloudGroup", par: ":CLOUD:" },
-            { varname: "Cloud Direction Low", var: "dirLow", par: ":dddL:" },
-            { varname: "Cloud Direction Mid", var: "dirMid", par: ":dddM:" },
-            { varname: "Cloud Direction High", var: "dirHigh", par: ":dddH:" },
-            { varname: "Cloud Group Identifier", var: "cGroup", par: ":CGROUP:" },
-
-            { varname: "24 Hour Rainfall Group", var: "RR24", par: ":RR24:" },
-            { varname: "Previous Day Minimum Temperature", var: "minTempPrev", par: ":TMIN:" },
-            { varname: "Weekly Rainfall Remark", var: "weeklyRRRemark", par: ":WEEKLYRR:" },
-            { varname: "Monthly Rainfall Group", var: "monthlyRRGroup", par: ":MONTHLYRR:" },
-            { varname: "Group 555 Rain Indicator", var: "group555", par: ":GROUP555:" },
-            { varname: "Sunshine Duration", var: "sunshine", par: ":SUNSHINE:" },
-        ];
-
-        const morsCols = [
-            { varname: "MorS", var: "MorS", par: ":MorS:" },
-            { varname: "ICAO", var: "ICAO", par: ":CCCC:" },
-            { varname: "Date", var: "sDate", par: ":YY:" },
-            { varname: "Hour", var: "sHour", par: ":GGgg:" },
-            { varname: "Surface Wind", var: "SurfaceWind", par: ":SW:" },
-            { varname: "Pressure VV", var: "PresVV", par: ":VVVV:" },
-            { varname: "Pressure Weather", var: "PresWx", par: ":PRESWX:" },
-            { varname: "Cloud", var: "cloud", par: ":CLOUD:" },
-            { varname: "Temperature & Dewpoint", var: "TD", par: ":TD:" },
-            { varname: "Altimeter Pressure", var: "AltPres", par: ":AP:" },
-            { varname: "Supplemental", var: "Supplemental", par: ":SUP:" },
-            { varname: "Remarks", var: "Remarks", par: ":REMARKS:" },
-            { varname: "Observer's", var: "Signature", par: ":OBSSIG:" },
-            { varname: "ATS Signature", var: "ATS", par: ":ATSSIG:" },
-        ];
+        const res = await fetch(`${API_URL}/api/codetemplate`);
+        const data = await res.json();
+        const templates = data.results || data;
 
         await withTransaction(db, async (tx) => {
-            console.log("Seeding codeparameter table...");
-            for (const col of synopCols) {
+            for (const t of templates) {
                 await tx.runAsync(
-                    `INSERT OR REPLACE INTO codeparameter (stnID, cID, varname, var, par)
-             VALUES (?, ?, ?, ?, ?)`,
-                    [1, synop?.cID, col.varname, col.var, col.par]
+                    `INSERT OR IGNORE INTO codetemplate
+                    (codeID, stnID, cID, hour, uID, Template, tType)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        t.codeID,
+                        t.stnID,
+                        t.cID,
+                        t.hour,
+                        t.uID || null,
+                        t.Template,
+                        t.tType
+                    ]
                 );
             }
+        });
 
-            console.log("Seeding codeparameter table for METAR & SPECI...");
-            for (const cat of morsCat) {
-                for (const col of morsCols) {
-                    await tx.runAsync(
-                        `INSERT OR REPLACE INTO codeparameter (stnID, cID, varname, var, par)
-                 VALUES (?, ?, ?, ?, ?)`,
-                        [1, cat.cID, col.varname, col.var, col.par]
-                    );
-                }
+        console.log("Codetemplates seeded locally.");
+    } catch (error) {
+        console.error("Error seeding codetemplates:", error);
+    }
+};
+
+
+export const seedTCodeParametersIfEmpty = async (db: SQLite.SQLiteDatabase) => {
+    try {
+        const existing = await db.getFirstAsync<{ count: number }>(`
+            SELECT COUNT(*) as count FROM codeparameter
+        `);
+
+        if (existing && existing.count > 0) {
+            console.log("Codeparameter already seeded.");
+            return;
+        }
+
+        console.log("Fetching codeparameters from API...");
+
+        const res = await fetch(`${API_URL}/api/codeparameter`);
+        const data = await res.json();
+        const params = data.results || data;
+
+        await withTransaction(db, async (tx) => {
+            for (const p of params) {
+                await tx.runAsync(
+                    `INSERT OR IGNORE INTO codeparameter 
+                    (paraID, stnID, uID, cID, varname, var, par)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)`,
+                    [
+                        p.paraID,
+                        p.stnID,
+                        p.uID || null,
+                        p.cID,
+                        p.varname,
+                        p.var,
+                        p.par
+                    ]
+                );
             }
         });
-        console.log("Code parameters seeded successfully within a transaction.");
+
+        console.log("Codeparameters seeded locally from API.");
     } catch (error) {
         console.error("Error seeding codeparameters:", error);
     }
@@ -1322,7 +1287,6 @@ export const seedTCodeParametersIfEmpty = async (db: SQLite.SQLiteDatabase) => {
 
 export const seedTCategories = async (db: SQLite.SQLiteDatabase) => {
     try {
-
         const result = await db.getFirstAsync<{ count: number }>(`
             SELECT COUNT(*) as count FROM category
         `);
@@ -1332,26 +1296,23 @@ export const seedTCategories = async (db: SQLite.SQLiteDatabase) => {
             return;
         }
 
-        console.log("Seeding category table...");
+        console.log("Fetching categories from API...");
 
-        const categories = [
-            "SYNOP",
-            "METAR",
-            "SPECI",
-            "AGROMET",
-        ];
+        const res = await fetch(`${API_URL}/api/category`);
+        const data = await res.json();
+        const categories = data.data || data;
 
         await withTransaction(db, async (tx) => {
             for (const c of categories) {
-                await tx.execAsync(`
-                    INSERT OR IGNORE INTO category (stnID, cName)
-                    VALUES (1, '${c}')
-                `);
+                await tx.runAsync(
+                    `INSERT OR IGNORE INTO category (cID, stnID, cName)
+                     VALUES (?, ?, ?)`,
+                    [c.cID, c.stnID || 1, c.cName]
+                );
             }
         });
 
-        console.log("Categories seeded successfully.");
-
+        console.log("Categories seeded locally from API.");
     } catch (error) {
         console.error("Error seeding categories:", error);
     }
@@ -1362,12 +1323,11 @@ export const computeObservedPeriod = async (
     stnID: number | string,
     sDate: string,
     sHour: string
-): Promise<string> => {
+): Promise<string | null> => {
 
     let hoursToCheck: number;
     let resultCode: string;
 
-    // Determine hours to check and result code based on synoptic hour
     if (sHour === "0000") {
         hoursToCheck = 24;
         resultCode = "4";
@@ -1378,22 +1338,18 @@ export const computeObservedPeriod = async (
         hoursToCheck = 3;
         resultCode = "7";
     } else {
-        // Hour not recognized -> return empty string
-        return "";
+        return null; // ✅ FIXED
     }
 
-    // Fetch all rows for that station and date
     const rows = await db.getAllAsync(
         `SELECT RR, sHour 
-     FROM synop_data
-     WHERE stnID = ?
-       AND sDate = ?`,
+         FROM synop_data
+         WHERE stnID = ? AND sDate = ?`,
         [stnID, sDate]
     );
 
     const currentHour = Number(sHour.slice(0, 2));
 
-    // Check if any recorded rainfall is within the period
     const hasRain = rows.some((r: any) => {
         if (!r.RR) return false;
 
@@ -1406,6 +1362,52 @@ export const computeObservedPeriod = async (
     return hasRain ? resultCode : "0";
 };
 
+// SMS Recipients
+export const getLSmsRecipients = async (
+    db: SQLite.SQLiteDatabase,
+    filters?: {
+        recipId?: number | string;
+        cID?: number | string;
+        stnId?: number | string;
+    }
+): Promise<any[]> => {
+    try {
+        let query = `
+            SELECT 
+                sr.*,
+                c.cName AS categoryName
+            FROM sms_recipients sr
+            LEFT JOIN category c ON sr.cID = c.cID
+            WHERE 1=1
+        `;
+
+        const params: (number | string)[] = [];
+
+        if (filters?.recipId !== undefined) {
+            query += ` AND sr.recipId = ?`;
+            params.push(filters.recipId);
+        }
+
+        if (filters?.cID !== undefined) {
+            query += ` AND sr.cID = ?`;
+            params.push(filters.cID);
+        }
+
+        if (filters?.stnId !== undefined) {
+            query += ` AND sr.stnId = ?`;
+            params.push(filters.stnId);
+        }
+
+        query += ` ORDER BY sr.name`;
+
+        const recipients = await db.getAllAsync(query, params);
+        return recipients;
+    } catch (error) {
+        console.error("Error fetching sms recipients with filters:", error);
+        return [];
+    }
+};
+
 // SMS Logs
 export const getLSmsLogs = async (
     db: SQLite.SQLiteDatabase,
@@ -1415,10 +1417,11 @@ export const getLSmsLogs = async (
         recip?: string;
         dateFrom?: string;
         dateTo?: string;
+        obsHour?: string;          // ✅ NEW ("0000"–"2300")
         limit?: number;
         offset?: number;
     },
-    sortBy: string = "dateSent",
+    sortBy: string = "obsDate",    // ✅ default now observation-based
     sortOrder: "ASC" | "DESC" = "DESC"
 ): Promise<{ data: any[], total: number }> => {
     try {
@@ -1434,11 +1437,13 @@ export const getLSmsLogs = async (
                 smsId,
                 sms_logs.stnId,
                 uId,
-                sId,
-                metId,
+                category,
                 status,
                 msg,
-                recip,
+                recip_num,
+                recip_name,
+                obsDate,              -- ✅ NEW
+                obsHour,              -- ✅ NEW
                 dateSent,
                 channel,
                 stations.stnName,
@@ -1462,33 +1467,52 @@ export const getLSmsLogs = async (
             params.push(filters.status);
         }
 
+        // search both name + number
         if (filters?.recip) {
-            countQuery += " AND recip LIKE ?";
-            dataQuery += " AND recip LIKE ?";
-            params.push(`%${filters.recip}%`);
+            countQuery += " AND (recip_num LIKE ? OR recip_name LIKE ?)";
+            dataQuery += " AND (recip_num LIKE ? OR recip_name LIKE ?)";
+            params.push(`%${filters.recip}%`, `%${filters.recip}%`);
         }
 
+        // ✅ UPDATED: use obsDate directly (no date() wrapper)
         if (filters?.dateFrom) {
-            countQuery += " AND date(dateSent) >= date(?)";
-            dataQuery += " AND date(dateSent) >= date(?)";
+            countQuery += " AND obsDate >= ?";
+            dataQuery += " AND obsDate >= ?";
             params.push(filters.dateFrom);
         }
 
         if (filters?.dateTo) {
-            countQuery += " AND date(dateSent) <= date(?)";
-            dataQuery += " AND date(dateSent) <= date(?)";
+            countQuery += " AND obsDate <= ?";
+            dataQuery += " AND obsDate <= ?";
             params.push(filters.dateTo);
         }
 
-        // Sorting for data query
-        const validSortColumns = ["dateSent", "status", "recip", "stnId"];
+        // ✅ NEW: filter by obsHour
+        if (filters?.obsHour) {
+            countQuery += " AND obsHour = ?";
+            dataQuery += " AND obsHour = ?";
+            params.push(filters.obsHour);
+        }
+
+        // ✅ Updated sortable columns
+        const validSortColumns = [
+            "obsDate",
+            "obsHour",
+            "dateSent",
+            "status",
+            "recip_num",
+            "recip_name",
+            "stnId",
+            "category"
+        ];
+
         if (validSortColumns.includes(sortBy)) {
             dataQuery += ` ORDER BY ${sortBy} ${sortOrder}`;
         } else {
-            dataQuery += ` ORDER BY dateSent ${sortOrder}`;
+            dataQuery += ` ORDER BY obsDate DESC, obsHour DESC`;
         }
 
-        // Pagination for data query
+        // Pagination
         if (filters?.limit) {
             dataQuery += " LIMIT ?";
             params.push(filters.limit);
@@ -1499,7 +1523,19 @@ export const getLSmsLogs = async (
             params.push(filters.offset);
         }
 
-        const totalResult = await db.getFirstAsync<{ total: number }>(countQuery, params.slice(0, - (filters?.limit ? 1 : 0) - (filters?.offset ? 1 : 0)));
+        // separate params for count
+        const countParams = params.slice(
+            0,
+            params.length -
+            (filters?.limit ? 1 : 0) -
+            (filters?.offset ? 1 : 0)
+        );
+
+        const totalResult = await db.getFirstAsync<{ total: number }>(
+            countQuery,
+            countParams
+        );
+
         const total = totalResult?.total || 0;
 
         const data = await db.getAllAsync(dataQuery, params);
@@ -1510,38 +1546,55 @@ export const getLSmsLogs = async (
         return { data: [], total: 0 };
     }
 };
-
 // Insert SMS Log
 export const insertLSmsLog = async (
     db: SQLite.SQLiteDatabase,
     smsLog: {
         stnId: number;
         uId?: number;
-        sId?: number;
-        metId?: number;
+        category: string;
         status: string;
         msg: string;
-        recip: string;
+        recip_num: string;
+        recip_name?: string;
+
+        obsDate: string;
+        obsHour: string;
+
         channel?: string;
     }
 ): Promise<number> => {
     try {
         const result = await db.runAsync(
             `
-            INSERT INTO sms_logs (stnId, uId, sId, metId, status, msg, recip, channel)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO sms_logs (
+                stnId,
+                uId,
+                category,
+                status,
+                msg,
+                recip_num,
+                recip_name,
+                obsDate,
+                obsHour,
+                channel
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `,
             [
                 smsLog.stnId,
                 smsLog.uId || null,
-                smsLog.sId || null,
-                smsLog.metId || null,
+                smsLog.category,
                 smsLog.status,
                 smsLog.msg,
-                smsLog.recip,
+                smsLog.recip_num,
+                smsLog.recip_name || null,
+                smsLog.obsDate,
+                smsLog.obsHour,
                 smsLog.channel || 'skyobs'
             ]
         );
+
         return result.lastInsertRowId;
     } catch (error) {
         console.error("Error inserting SMS log:", error);
@@ -1553,26 +1606,23 @@ export const insertLSmsLog = async (
 export const checkSmsExists = async (
     db: SQLite.SQLiteDatabase,
     msg: string,
-    recip: string,
-    status: string = "success",
-    recordId?: number | string | null,
-    idType?: 'sId' | 'metId'
+    recip_num: string,
+    category: string
 ): Promise<boolean> => {
     try {
-        let query = `
+        const result = await db.getFirstAsync<{ count: number }>(
+            `
             SELECT COUNT(*) as count
             FROM sms_logs
-            WHERE msg = ? AND recip = ? AND status = ?
-        `;
-        const params: any[] = [msg, recip, status];
+            WHERE msg = ?
+              AND recip_num = ?
+              AND category = ?
+              AND status = 'success'
+            `,
+            [msg, recip_num, category]
+        );
 
-        if (recordId && idType) {
-            query += ` AND ${idType} = ?`;
-            params.push(recordId);
-        }
-
-        const result = await db.getFirstAsync<{ count: number }>(query, params);
-        return (result?.count || 0) > 0;
+        return (result?.count ?? 0) > 0;
     } catch (error) {
         console.error("Error checking SMS existence:", error);
         return false;
@@ -1604,19 +1654,179 @@ export const testSmsLogsTable = async (db: SQLite.SQLiteDatabase) => {
 // Check if SMS was sent for a specific category on a record
 export const checkSmsSentForCategory = async (
     db: SQLite.SQLiteDatabase,
-    recordId: number | string | null,
-    idType: 'sId' | 'metId',
     category: string
 ): Promise<boolean> => {
-    if (!recordId) return false;
     try {
         const result = await db.getFirstAsync(
-            `SELECT 1 FROM sms_logs WHERE ${idType} = ? AND channel = ? AND status = 'success' LIMIT 1`,
-            [recordId, category]
+            `
+            SELECT 1 
+            FROM sms_logs 
+            WHERE category = ? 
+              AND status = 'success'
+            LIMIT 1
+            `,
+            [category]
         );
+
         return !!result;
     } catch (error) {
         console.error("Error checking SMS sent for category:", error);
         return false;
+    }
+};
+
+// User functions
+export const getCurrentUser = async (
+    db: SQLite.SQLiteDatabase
+) => {
+    try {
+        const result = await db.getFirstAsync<any>(`
+            SELECT 
+                uc.*,
+                uc.user_id as id, -- ✅ map to frontend user.id
+                s.stnName AS station_name,
+                s.stationID AS station_code,
+                s.Province AS station_province,
+                s.Town AS station_town
+            FROM user_config uc
+            LEFT JOIN stations s 
+                ON uc.station_id = s.Id
+            WHERE uc.id = 1
+            LIMIT 1
+            `);
+        if (!result) return null;
+
+        return result;
+    } catch (error) {
+        console.error("Error getting current user:", error);
+        return null;
+    }
+};
+export const setCurrentUser = async (
+    db: SQLite.SQLiteDatabase,
+    userData: any
+) => {
+    try {
+        await db.runAsync(`
+        INSERT OR REPLACE INTO user_config (
+            id,
+            user_id,
+            username,
+            fullName,
+            userType,
+            status,
+            station_id,
+            auth_token,
+            createdAt,
+            updatedAt
+        )
+        VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `, [
+            userData.id,  // backend ID
+            userData.username,
+            userData.fullName ?? null,
+            userData.userType ?? 'USER',
+            userData.status ?? 'ACTIVE',
+            userData.station_id ?? null,
+            userData.auth_token,
+            userData.createdAt ?? new Date().toISOString(),
+            userData.updatedAt ?? new Date().toISOString()
+        ]);
+
+    } catch (error) {
+        console.error("Error setting user config:", error);
+    }
+};
+
+export const createTUserConfig = async (db: SQLite.SQLiteDatabase) => {
+    try {
+        await db.execAsync(`
+        CREATE TABLE IF NOT EXISTS user_config (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            user_id INTEGER,
+            username TEXT NOT NULL,
+            fullName TEXT,
+            userType TEXT DEFAULT 'USER',
+            status TEXT DEFAULT 'ACTIVE',
+            station_id INTEGER,
+            auth_token TEXT NOT NULL,
+            createdAt TEXT DEFAULT (datetime('now')),
+            updatedAt TEXT DEFAULT (datetime('now')),
+            FOREIGN KEY (station_id) REFERENCES stations(id)
+        );
+        `);
+
+        console.log("user_config table created successfully.");
+    } catch (error) {
+        console.error("Error creating user_config table:", error);
+    }
+};
+
+export const clearCurrentUser = async (
+    db: SQLite.SQLiteDatabase
+) => {
+    try {
+        await db.runAsync("DELETE FROM user_config WHERE id = 1");
+        console.log("User cleared successfully");
+    } catch (error) {
+        console.error("Error clearing current user:", error);
+    }
+};
+
+export const upsertSmsRecipient = async (
+    db: SQLite.SQLiteDatabase,
+    data: {
+        recipId?: number;
+        stnId: number;
+        cID: number;
+        num: string;
+        name?: string;
+    }
+) => {
+    try {
+        if (data.recipId) {
+            await db.runAsync(
+                `
+                UPDATE sms_recipients
+                SET
+                    cID = ?,
+                    num = ?,
+                    name = ?,
+                    date_updated = datetime('now')
+                WHERE recipId = ?
+                `,
+                [data.cID, data.num, data.name ?? null, data.recipId]
+            );
+        } else {
+            await db.runAsync(
+                `
+                INSERT INTO sms_recipients (
+                    stnId,
+                    cID,
+                    num,
+                    name
+                )
+                VALUES (?, ?, ?, ?)
+                `,
+                [data.stnId, data.cID, data.num, data.name ?? null]
+            );
+        }
+    } catch (error) {
+        console.error("Error upserting SMS recipient:", error);
+    }
+};
+
+
+export const deleteSmsRecipient = async (
+    db: SQLite.SQLiteDatabase,
+    recipId: number
+) => {
+    try {
+        await db.runAsync(
+            `DELETE FROM sms_recipients WHERE recipId = ?`,
+            [recipId]
+        );
+    } catch (error) {
+        console.error("Error deleting SMS recipient:", error);
     }
 };

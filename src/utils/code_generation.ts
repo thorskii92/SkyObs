@@ -1,4 +1,5 @@
 import { SQLiteDatabase } from "expo-sqlite";
+import { getSunshineDuration } from "./api";
 import { getLAerodromeData, getLCodeParams, getLCodeTemplate } from "./db";
 import { formatRH, formatTemp } from "./formatters";
 
@@ -307,16 +308,13 @@ async function getRain24Group(
     return `6${code}4`;
 }
 
-async function getSunshineGroup(
-    db: SQLiteDatabase,
+export async function getSunshineGroup(
     stnID: string,
     sDate: string
 ): Promise<string> {
 
-    const row = await db.getFirstAsync<any>(
-        `SELECT * FROM sunshine_duration WHERE stnID=? AND sDate=?`,
-        [stnID, sDate]
-    );
+    // Fetch sunshine data via API
+    const row = await getSunshineDuration({ stnId: stnID, sDate });
 
     if (!row) return "";
 
@@ -324,10 +322,10 @@ async function getSunshineGroup(
 
     for (let i = 5; i <= 19; i++) {
         const val = Number(row[`s${i}`] ?? 0);
-        totalSunshine += Math.round((val / 60) * 10) / 10;
+        totalSunshine += val
     }
-
-    totalSunshine = Math.round(totalSunshine * 10) / 10;
+    
+    totalSunshine = totalSunshine / 60
 
     const code = Math.round(totalSunshine * 10)
         .toString()
@@ -504,7 +502,6 @@ export default async function generateCodeFromTemplate(
         let code: string = templateRow.Template;
 
         const codeParams = await getLCodeParams(db, stnID, category.cID);
-        console.log(codeParams);
         if (!codeParams || !codeParams.length) return "";
 
         let procData = { ...obsData };
@@ -512,7 +509,8 @@ export default async function generateCodeFromTemplate(
         if (category.cName === "SYNOP") {
             if (hour === "00") {
                 procData.RR24 = await getRain24Group(db, stnID, String(obsData.summaryDate ?? ""));
-                procData.sunshine = ""; // TODO: total sunshine if available
+                procData.sunshine = await getSunshineGroup(stnID, String(obsData.summaryDate));
+
                 procData.minTempPrev = await getPrevMinTemp(db, stnID, String(obsData.summaryDate ?? ""));
                 procData.weeklyRemark = await getWeeklyRainRemark(db, obsData.summaryDate as string, stnID);
                 procData.monthlyGroup = await getMonthlyRainGroup(db, stnID, obsData.summaryDate as string);
@@ -520,7 +518,6 @@ export default async function generateCodeFromTemplate(
             }
 
             procData.wmostn = `${obsData.wmoID}${obsData.stationID}`;
-            console.log(procData.wmostn)
             procData.rainIndc = getRainIndicator(String(obsData.RR ?? ""), String(obsData.sHour ?? ""));
             procData.wpIndc = getWeatherIndicator(
                 String(obsData.presW ?? ""),
@@ -566,6 +563,16 @@ export default async function generateCodeFromTemplate(
                 String(obsData.typeFourthLayer ?? ""),
                 String(obsData.heightFourthLayer ?? "")
             );
+
+            const noClouds =
+                !obsData.amtFirstLayer &&
+                !obsData.amtSecondLayer &&
+                !obsData.amtThirdLayer &&
+                !obsData.amtFourthLayer;
+
+            procData.cGroup = noClouds ? "" : procData.cGroup;
+            procData.cloudGroup = noClouds ? "" : procData.cloudGroup;
+            procData.heightLL = noClouds ? "9" : procData.heightLL;
             procData.dirLow = getCodeDir(String(obsData.dirLow ?? ""));
             procData.dirMid = getCodeDir(String(obsData.dirMid ?? ""));
             procData.dirHigh = getCodeDir(String(obsData.dirHigh ?? ""));
@@ -586,8 +593,6 @@ export default async function generateCodeFromTemplate(
 
         }
 
-        console.log(category)
-
         if (category.cName === "METAR" || category.cName === "SPECI") {
             // 1️⃣ Fetch the latest aerodrome observation for this station, date, and hour
             const aeroData = await getLAerodromeData(
@@ -607,10 +612,21 @@ export default async function generateCodeFromTemplate(
                 [stnID]
             );
             const stationICAO = station?.ICAO ?? "";
-            console.log("Template:", templateRow.Template);
-            console.log("Latest aerodrome:", latest, "Station ICAO:", stationICAO);
+
 
             // 2️⃣ Copy into procData
+            const cloudLayers = [
+                latest.Cloud1,
+                latest.Cloud2,
+                latest.Cloud3,
+                latest.Cloud4
+            ].filter(Boolean);
+
+            const isCAVOK =
+                (latest.PresVV === "9999" || latest.PresVV === 9999) &&
+                (!latest.PresWx || latest.PresWx.trim() === "") &&
+                cloudLayers.length === 0;
+
             procData = {
                 ...procData,
                 MorS: category.cName,
@@ -620,16 +636,20 @@ export default async function generateCodeFromTemplate(
                     : "",
                 sHour: latest.sHour,
                 SurfaceWind: latest.SurfaceWind ?? "",
-                PresVV: latest.PresVV ?? "////",
-                PresWx: latest.PresWx ?? "",
-                Cloud: [latest.Cloud1, latest.Cloud2, latest.Cloud3, latest.Cloud4].filter(Boolean).join(" "),
+
+                // ✅ KEY CHANGE
+                PresVV: isCAVOK ? "CAVOK" : (latest.PresVV ?? "////"),
+                PresWx: isCAVOK ? "" : (latest.PresWx ?? ""),
+                Cloud: isCAVOK ? "" : cloudLayers.join(" "),
+
                 TD: [
                     latest.Tem != null ? String(latest.Tem).padStart(2, "0") : "",
                     latest.Dew != null ? String(latest.Dew).padStart(2, "0") : ""
                 ].join("/"),
-                AltPres: latest.AltPres ?? "Q////",
+
+                AltPres: latest.AltPres ? `Q${latest.AltPres}` : "Q////",
                 Supplemental: latest.Supplemental ?? "",
-                Remarks: latest.Remarks ?? "",
+                Remarks: `RMK ${latest.Remarks?.trim() || ""} A${Math.round(latest.AltPres * 2.953)}`,
                 Signature: latest.Signature ?? "",
                 ATS: latest.ATS ?? ""
             };

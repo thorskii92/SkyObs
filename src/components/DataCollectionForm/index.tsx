@@ -8,12 +8,17 @@ import { router } from "expo-router";
 import { AlertDialog, AlertDialogBackdrop, AlertDialogBody, AlertDialogContent, AlertDialogFooter, AlertDialogHeader } from "@/components/ui/alert-dialog";
 
 import { Heading } from "@/components/ui/heading";
+import { Toast, ToastDescription, ToastTitle, useToast } from '@/components/ui/toast';
+import { VStack } from "@/components/ui/vstack";
 import { getPsychrometric } from "@/src/utils/api";
 import { computeObservedPeriod, getDB, getLPsychrometric, getLSynopData, withTransaction } from "@/src/utils/db";
-import { formatNet3hr, formatPres, formatPres24, formatRH, formatTemp, formatVaporP } from "@/src/utils/formatters";
+import { formatNet3hr, formatPres, formatPres24, formatTemp, formatVaporP, formatWind } from "@/src/utils/formatters";
 import { get24HoursAgo, get3HoursAgo } from "@/src/utils/time";
 import { isTendencyValid, validateField, validateMaxTemp, validateMinTemp } from "@/src/utils/validators";
-import { CircleGaugeIcon, CloudRainWindIcon, CloudyIcon, FileText, ThermometerIcon, ViewIcon, WindIcon } from "lucide-react-native";
+
+import { Icon } from "@/components/ui/icon";
+import { CircleGaugeIcon, CloseIcon, CloudRainWindIcon, CloudyIcon, FileText, ThermometerIcon, ViewIcon, WindIcon } from "lucide-react-native";
+import { Pressable } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import CategoryGroup from "./CategoryGroup";
 import CloudDirInput from "./CloudDirInput";
@@ -21,26 +26,36 @@ import CloudLayerInput from "./CloudLayerInput";
 import FormInput from "./FormInput";
 import FormTextarea from "./FormTextarea";
 import ObservationHeader from "./ObservationHeader";
+// import { checkApiConnection, saveSynopData, API_URL } from "../api"; // adjust path if needed
+import { API_URL, checkApiConnection, saveSynopData } from "@/src/utils/api";
 
 const TRACE = "0.01";
 
 export default function DataCollectionForm({ dataParams, formData, setField, errors, setError }) {
-    const onSave = async (): Promise<boolean> => {
+    const toast = useToast();
+
+    const handleSaveObservation = async (
+        mode: "save" | "update" | "qc"
+    ): Promise<boolean> => {
+        if (isSaveBtnLoading) return false;
         setIsSaveBtnLoading(true);
 
         try {
+            const db = await getDB();
+
+            // =========================
+            // VALIDATION
+            // =========================
             const allErrors: string[] = [];
 
-            // Helper to recursively validate fields
-            const validateObject = (obj: any, errObj: any, path: string[] = []) => {
+            const validateObject = (obj: any, errObj: any) => {
                 for (const key in obj) {
                     if (typeof obj[key] === "object" && obj[key] !== null) {
-                        validateObject(obj[key], errObj[key], [...path, key]);
+                        validateObject(obj[key], errObj[key]);
                     } else {
-                        const val = obj[key];
                         const err = errObj[key];
                         if (err && err.trim() !== "") {
-                            allErrors.push(`${err}`);
+                            allErrors.push(err);
                         }
                     }
                 }
@@ -48,55 +63,39 @@ export default function DataCollectionForm({ dataParams, formData, setField, err
 
             validateObject(formData, errors);
 
-            const hasAtLeastOneValue = (obj: any, ignorePath: string[] = []) => {
-                let found = false;
-
-                const check = (current: any, path: string[] = []) => {
-                    for (const key in current) {
-                        const newPath = [...path, key];
-
-                        // Skip signature
-                        if (newPath.join(".") === "observer.obsINT") continue;
-
-                        const value = current[key];
-
-                        if (typeof value === "object" && value !== null) {
-                            check(value, newPath);
-                        } else {
-                            if (value !== "" && value !== null && value !== undefined) {
-                                found = true;
-                            }
-                        }
-                    }
-                };
-
-                check(obj);
-                return found;
-            };
-
-            const hasAnyData = hasAtLeastOneValue(formData);
-
-            if (!hasAnyData) {
-                setAlertTitle("No Observation Data Entered");
-                setAlertMessage(
-                    "Please input at least one field before saving the observation."
-                );
-                handleOpenDialog();
-                return false;
-            }
-
             if (allErrors.length > 0) {
                 setAlertTitle("Invalid Observation Inputs");
-                setAlertMessage(
-                    "Some fields contain invalid or incorrectly formatted values. Please review the highlighted fields before saving."
-                );
+                setAlertMessage("Please review highlighted fields.");
                 handleOpenDialog();
                 return false;
             }
 
-            // --- Save to database ---
-            const db = await getDB();
+            // =========================
+            // CHECK EXISTING
+            // =========================
+            const existing = await db.getFirstAsync(
+                `SELECT sID, isValidated FROM synop_data 
+             WHERE stnID = ? AND sDate = ? AND sHour = ?`,
+                [dataParams.stationId, dataParams.date, dataParams.time]
+            );
 
+            if (mode === "save" && existing) {
+                setAlertTitle("Record Exists");
+                setAlertMessage("Record already exists. Use Update instead.");
+                handleOpenDialog();
+                return false;
+            }
+
+            if (existing?.isValidated === 1 && mode !== "qc") {
+                setAlertTitle("Already Validated");
+                setAlertMessage("Validated records cannot be modified.");
+                handleOpenDialog();
+                return false;
+            }
+
+            // =========================
+            // COMPUTE
+            // =========================
             const computedTR = await computeObservedPeriod(
                 db,
                 dataParams.stationId,
@@ -104,125 +103,168 @@ export default function DataCollectionForm({ dataParams, formData, setField, err
                 dataParams.time
             );
 
-            await withTransaction(db, async () => {
-                // Convert fields for SQLite insert/update
-                const record: any = {
-                    stnID: dataParams.stationId,
-                    sDate: dataParams.date,
-                    sHour: dataParams.time,
-                    heightLL: Number(formData.visibility.heightLL) || null,
-                    VV: Number(formData.visibility.VV) || null,
-                    SummTotal: Number(formData.visibility.SummTotal) || null,
-                    wDir: Number(formData.wind.wDir) || null,
-                    wSpd: Number(formData.wind.wSpd) || null,
-                    dBulb: Number(formData.temperature.dBulb) || null,
-                    wBulb: Number(formData.temperature.wBulb) || null,
-                    dPoiint: Number(formData.temperature.dPoiint) || null,
-                    RH: Number(formData.temperature.RH) || null,
-                    vaporP: Number(formData.temperature.vaporP) || null,
-                    maxTemp: Number(formData.temperature.maxTemp) || null,
-                    minTemp: Number(formData.temperature.minTemp) || null,
-                    stnP: Number(formData.pressure.stnP) || null,
-                    mslP: Number(formData.pressure.mslP) || null,
-                    altP: Number(formData.pressure.altP) || null,
-                    tendency: formData.pressure.tendency,
-                    net3hr: Number(formData.pressure.net3hr) || null,
-                    pres24: Number(formData.pressure.pres24) || null,
-                    pAttachTherm: Number(formData.pressure.pAttachTherm) || null,
-                    pObsBaro: Number(formData.pressure.pObsBaro) || null,
-                    pCorrection: Number(formData.pressure.pCorrection) || null,
-                    pBarograph: Number(formData.pressure.pBarograph) || null,
-                    pBaroCorrection: Number(formData.pressure.pBaroCorrection) || null,
-                    RR: formData.atmosphericPhenomena.RR ? Number(formData.atmosphericPhenomena.RR) : null,
-                    tR: computedTR,
-                    presW: formData.atmosphericPhenomena.presW ? Number(formData.atmosphericPhenomena.presW) : null,
-                    pastW1: formData.atmosphericPhenomena.pastW?.[0] != null ? Number(formData.atmosphericPhenomena.pastW[0]) : 0,
-                    pastW2: formData.atmosphericPhenomena.pastW?.[1] != null ? Number(formData.atmosphericPhenomena.pastW[1]) : 0,
-                    amtLC: Number(formData.clouds.amtLC) || null,
-                    amtFirstLayer: Number(formData.clouds.firstLayer.amt) || null,
-                    typeFirstLayer: formData.clouds.firstLayer.type || null,
-                    heightFirstLayer: Number(formData.clouds.firstLayer.height) || null,
-                    amtSecondLayer: Number(formData.clouds.secondLayer.amt) || null,
-                    typeSecondLayer: formData.clouds.secondLayer.type || null,
-                    heightSecondLayer: Number(formData.clouds.secondLayer.height) || null,
-                    amtThirdLayer: Number(formData.clouds.thirdLayer.amt) || null,
-                    typeThirdLayer: formData.clouds.thirdLayer.type || null,
-                    heightThirdLayer: Number(formData.clouds.thirdLayer.height) || null,
-                    amtFourthLayer: Number(formData.clouds.fourthLayer.amt) || null,
-                    typeFourthLayer: formData.clouds.fourthLayer.type || null,
-                    heightFourthLayer: Number(formData.clouds.fourthLayer.height) || null,
-                    ceiling: Number(formData.clouds.ceiling) || null,
-                    dirLow: formData.clouds.dirLow || null,
-                    dirMid: formData.clouds.dirMid || null,
-                    dirHigh: formData.clouds.dirHigh || null,
-                    remark: formData.observer.remark || null,
-                    obsINT: formData.observer.obsINT || null,
-                    summaryDate: dataParams.time === "0000"
-                        ? new Date(new Date().setDate(new Date().getDate() - 1)).toISOString().slice(0, 10)
+            // =========================
+            // FULL RECORD
+            // =========================
+            const record: any = {
+                stnID: dataParams.stationId,
+                sDate: dataParams.date,
+                sHour: dataParams.time,
+
+                heightLL: Number(formData.visibility.heightLL) || null,
+                VV: Number(formData.visibility.VV) || null,
+                SummTotal: Number(formData.visibility.SummTotal) || null,
+
+                wDir: Number(formData.wind.wDir) || null,
+                wSpd: Number(formData.wind.wSpd) || null,
+
+                dBulb: Number(formData.temperature.dBulb) || null,
+                wBulb: Number(formData.temperature.wBulb) || null,
+                dPoiint: Number(formData.temperature.dPoiint) || null,
+                RH: Number(formData.temperature.RH) || null,
+                vaporP: Number(formData.temperature.vaporP) || null,
+                maxTemp: Number(formData.temperature.maxTemp) || null,
+                minTemp: Number(formData.temperature.minTemp) || null,
+
+                stnP: Number(formData.pressure.stnP) || null,
+                mslP: Number(formData.pressure.mslP) || null,
+                altP: Number(formData.pressure.altP) || null,
+                tendency: formData.pressure.tendency || null,
+                net3hr: Number(formData.pressure.net3hr) || null,
+                pres24: Number(formData.pressure.pres24) || null,
+
+                pAttachTherm: Number(formData.pressure.pAttachTherm) || null,
+                pObsBaro: Number(formData.pressure.pObsBaro) || null,
+                pCorrection: Number(formData.pressure.pCorrection) || null,
+                pBarograph: Number(formData.pressure.pBarograph) || null,
+                pBaroCorrection: Number(formData.pressure.pBaroCorrection) || null,
+
+                RR: formData.atmosphericPhenomena.RR
+                    ? Number(formData.atmosphericPhenomena.RR)
+                    : null,
+
+                presW: formData.atmosphericPhenomena.presW
+                    ? Number(formData.atmosphericPhenomena.presW)
+                    : null,
+
+                pastW1:
+                    formData.atmosphericPhenomena.pastW?.[0] != null
+                        ? Number(formData.atmosphericPhenomena.pastW[0])
+                        : 0,
+
+                pastW2:
+                    formData.atmosphericPhenomena.pastW?.[1] != null
+                        ? Number(formData.atmosphericPhenomena.pastW[1])
+                        : 0,
+
+                amtLC: formData.clouds.amtLC || null,
+
+                amtFirstLayer: formData.clouds.firstLayer.amt || null,
+                typeFirstLayer: formData.clouds.firstLayer.type || null,
+                heightFirstLayer: formData.clouds.firstLayer.height || null,
+
+                amtSecondLayer: formData.clouds.secondLayer.amt || null,
+                typeSecondLayer: formData.clouds.secondLayer.type || null,
+                heightSecondLayer: formData.clouds.secondLayer.height || null,
+
+                amtThirdLayer: formData.clouds.thirdLayer.amt || null,
+                typeThirdLayer: formData.clouds.thirdLayer.type || null,
+                heightThirdLayer: formData.clouds.thirdLayer.height || null,
+
+                amtFourthLayer: formData.clouds.fourthLayer.amt || null,
+                typeFourthLayer: formData.clouds.fourthLayer.type || null,
+                heightFourthLayer: formData.clouds.fourthLayer.height || null,
+
+                ceiling: formData.clouds.ceiling || null,
+                dirLow: formData.clouds.dirLow || null,
+                dirMid: formData.clouds.dirMid || null,
+                dirHigh: formData.clouds.dirHigh || null,
+
+                remark: formData.observer.remark || null,
+                obsINT: formData.observer.obsINT || null,
+
+                tR: computedTR,
+
+                summaryDate:
+                    dataParams.time === "0000"
+                        ? new Date(new Date().setDate(new Date().getDate() - 1))
+                            .toISOString()
+                            .slice(0, 10)
                         : new Date().toISOString().slice(0, 10),
-                };
 
-                // Upsert: try update first
-                const res = await db.runAsync(
-                    `UPDATE synop_data SET 
-                    heightLL = ?, VV = ?, SummTotal = ?, wDir = ?, wSpd = ?, 
-                    dBulb = ?, wBulb = ?, dPoiint = ?, RH = ?, vaporP = ?, 
-                    maxTemp = ?, minTemp = ?, stnP = ?, mslP = ?, altP = ?, 
-                    tendency = ?, net3hr = ?, pres24 = ?, pAttachTherm = ?, 
-                    pObsBaro = ?, pCorrection = ?, pBarograph = ?, pBaroCorrection = ?, 
-                    RR = ?, tR = ?, presW = ?, pastW1 = ?, pastW2 = ?,
-                    amtLC = ?, amtFirstLayer = ?, typeFirstLayer = ?, heightFirstLayer = ?, 
-                    amtSecondLayer = ?, typeSecondLayer = ?, heightSecondLayer = ?, 
-                    amtThirdLayer = ?, typeThirdLayer = ?, heightThirdLayer = ?, 
-                    amtFourthLayer = ?, typeFourthLayer = ?, heightFourthLayer = ?, 
-                    ceiling = ?, dirLow = ?, dirMid = ?, dirHigh = ?, remark = ?, obsINT = ?, summaryDate = ?
-                 WHERE stnID = ? AND sDate = ? AND sHour = ?`,
-                    [
-                        record.heightLL, record.VV, record.SummTotal, record.wDir, record.wSpd,
-                        record.dBulb, record.wBulb, record.dPoiint, record.RH, record.vaporP,
-                        record.maxTemp, record.minTemp, record.stnP, record.mslP, record.altP,
-                        record.tendency, record.net3hr, record.pres24, record.pAttachTherm,
-                        record.pObsBaro, record.pCorrection, record.pBarograph, record.pBaroCorrection,
-                        record.RR, record.tR, record.presW, record.pastW1, record.pastW2,
-                        record.amtLC, record.amtFirstLayer, record.typeFirstLayer, record.heightFirstLayer,
-                        record.amtSecondLayer, record.typeSecondLayer, record.heightSecondLayer,
-                        record.amtThirdLayer, record.typeThirdLayer, record.heightThirdLayer,
-                        record.amtFourthLayer, record.typeFourthLayer, record.heightFourthLayer,
-                        record.ceiling, record.dirLow, record.dirMid, record.dirHigh, record.remark, record.obsINT, record.summaryDate,
-                        record.stnID, record.sDate, record.sHour
-                    ]
-                );
+                isValidated: mode === "qc" ? 1 : 0
+            };
 
-                console.log("Update result:", res);
+            // =========================
+            // DYNAMIC SQL BUILDER
+            // =========================
+            const keys = Object.keys(record);
+            const values = keys.map((k) => record[k]);
 
-                if (!res || (res.rowsAffected ?? res.changes ?? 0) === 0) {
-                    // Insert if update didn't affect any row
+            await withTransaction(db, async () => {
+                if (existing) {
+                    const setClause = keys.map((k) => `${k}=?`).join(", ");
+
                     await db.runAsync(
-                        `INSERT INTO synop_data (
-                        stnID, sDate, sHour, heightLL, VV, SummTotal, wDir, wSpd,
-                        dBulb, wBulb, dPoiint, RH, vaporP, maxTemp, minTemp, stnP, mslP, altP, 
-                        tendency, net3hr, pres24, pAttachTherm, pObsBaro, pCorrection, pBarograph, 
-                        pBaroCorrection, RR, tR, presW, pastW1, pastW2, 
-                        amtLC, amtFirstLayer, typeFirstLayer, heightFirstLayer, 
-                        amtSecondLayer, typeSecondLayer, heightSecondLayer, 
-                        amtThirdLayer, typeThirdLayer, heightThirdLayer, 
-                        amtFourthLayer, typeFourthLayer, heightFourthLayer, 
-                        ceiling, dirLow, dirMid, dirHigh, remark, obsINT, summaryDate
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-                        Object.values(record)
+                        `UPDATE synop_data SET ${setClause} WHERE sID=?`,
+                        [...values, existing.sID]
+                    );
+                } else {
+                    const placeholders = keys.map(() => "?").join(", ");
+
+                    await db.runAsync(
+                        `INSERT INTO synop_data (${keys.join(", ")}) VALUES (${placeholders})`,
+                        values
                     );
                 }
             });
 
-            setAlertTitle("Success");
-            setAlertMessage("Observation saved successfully!");
-            handleOpenDialog();
+            // =========================
+            // API SYNC
+            // =========================
+            try {
+                const isOnline = await checkApiConnection();
 
+                if (isOnline) {
+                    const apiPayload = {
+                        ...record,
+                        stnId: record.stnID
+                    };
+                    delete apiPayload.stnID;
+
+                    if (existing) {
+                        await fetch(`${API_URL}/api/synop_data`, {
+                            method: "PUT",
+                            headers: { "Content-Type": "application/json" },
+                            body: JSON.stringify(apiPayload),
+                        });
+                    } else {
+                        await saveSynopData(apiPayload);
+                    }
+                }
+            } catch (apiErr) {
+                console.warn("API sync failed:", apiErr);
+            }
+
+            // =========================
+            // SUCCESS
+            // =========================
+            setAlertTitle("Success");
+            setAlertMessage(
+                mode === "qc"
+                    ? "Saved, validated, and synced."
+                    : mode === "update"
+                        ? "Observation updated."
+                        : "Observation saved."
+            );
+
+            handleOpenDialog();
             return true;
+
         } catch (err) {
             console.error("Save failed:", err);
-            setAlertTitle("Save Error");
-            setAlertMessage("Failed to save observation. Please try again.");
+            setAlertTitle("Error");
+            setAlertMessage("Failed to save observation.");
             handleOpenDialog();
             return false;
         } finally {
@@ -230,7 +272,6 @@ export default function DataCollectionForm({ dataParams, formData, setField, err
         }
     };
 
-    const onMarkQC = () => { }
     const [isSaveBtnLoading, setIsSaveBtnLoading] = useState<boolean>(false);
     const [showAlertDialog, setShowAlertDialog] = useState<boolean>(false);
     const [alertTitle, setAlertTitle] = useState<string>("");
@@ -445,9 +486,8 @@ export default function DataCollectionForm({ dataParams, formData, setField, err
             return null;
         }
     };
-    const dBulbAutoComputeFn = async (dBulb: string) => {
-        const wBulb = formData.temperature.wBulb;
 
+    const autoComputePsychrometric = async (dBulb: string, wBulb: string) => {
         if (!dBulb || !wBulb) {
             setField(["temperature", "dPoiint"], "");
             setField(["temperature", "RH"], "");
@@ -455,38 +495,132 @@ export default function DataCollectionForm({ dataParams, formData, setField, err
             return;
         }
 
-        const pD = await fetchPsychrometric(dBulb, wBulb);
+        const toastId = String(Math.random());
 
-        if (pD) {
-            const { dPoint, RH, vPressure } = pD;
+        // 🔄 Loading toast
+        toast.show({
+            id: toastId,
+            placement: 'top',
+            duration: null,
+            render: () => (
+                <Toast
+                    action="muted"
+                    variant="outline"
+                >
+                    <VStack space="xs">
+                        <ToastTitle className="font-semibold">
+                            Retrieving Data...
+                        </ToastTitle>
+                        <ToastDescription size="sm">
+                            Comparing values to database for Dew Point, RH, and Vapor Pressure.
+                        </ToastDescription>
+                    </VStack>
+                </Toast>
+            ),
+        });
 
-            setField(["temperature", "dPoiint"], String(dPoint) ?? "");
-            setField(["temperature", "RH"], String(RH) ?? "");
-            setField(["temperature", "vaporP"], String(vPressure) ?? "");
+        try {
+            const pD = await fetchPsychrometric(dBulb, wBulb);
+
+            toast.close(toastId);
+
+            const isValid =
+                pD &&
+                pD.dPoint != null &&
+                pD.RH != null &&
+                pD.vPressure != null;
+
+            if (isValid) {
+                const { dPoint, RH, vPressure } = pD;
+
+                setField(["temperature", "dPoiint"], String(dPoint));
+                setField(["temperature", "RH"], String(RH).split(".")[0]);
+                setField(["temperature", "vaporP"], String(vPressure));
+
+                toast.show({
+                    placement: 'top',
+                    duration: 3000,
+                    render: ({ id }) => (
+                        <Toast
+                            action="success"
+                            variant="outline"
+                        >
+                            <VStack space="xs">
+                                <ToastTitle className="font-semibold text-green-600">
+                                    Data Retrieved
+                                </ToastTitle>
+                                <ToastDescription size="sm">
+                                    Dew Point, RH, and Vapor Pressure loaded.
+                                </ToastDescription>
+                            </VStack>
+                            <Pressable onPress={() => toast.close(id)}>
+                                <Icon as={CloseIcon} />
+                            </Pressable>
+                        </Toast>
+                    ),
+                });
+
+            } else {
+                toast.show({
+                    placement: 'top',
+                    duration: 3000,
+                    render: ({ id }) => (
+                        <Toast
+                            action="warning"
+                            variant="outline"
+                        >
+                            <VStack space="xs">
+                                <ToastTitle className="font-semibold text-warning-600">
+                                    No Psychrometric Data
+                                </ToastTitle>
+                                <ToastDescription size="sm">
+                                    No matching data found.
+                                </ToastDescription>
+                            </VStack>
+                            <Pressable onPress={() => toast.close(id)} className="absolute top-2 right-2">
+                                <Icon as={CloseIcon} />
+                            </Pressable>
+                        </Toast>
+                    ),
+                });
+            }
+
+        } catch (err) {
+            toast.close(toastId);
+
+            toast.show({
+                placement: 'top',
+                duration: 3000,
+                render: ({ id }) => (
+                    <Toast
+                        action="error"
+                        variant="outline"
+                    >
+                        <VStack space="xs">
+                            <ToastTitle className="font-semibold text-red-600">
+                                Error Fetching Data
+                            </ToastTitle>
+                            <ToastDescription size="sm">
+                                Something went wrong.
+                            </ToastDescription>
+                        </VStack>
+                        <Pressable onPress={() => toast.close(id)}>
+                            <Icon as={CloseIcon} />
+                        </Pressable>
+                    </Toast>
+                ),
+            });
         }
+    };
+
+    const dBulbAutoComputeFn = async (dBulb: string) => {
+        const wBulb = formData.temperature.wBulb;
+        await autoComputePsychrometric(dBulb, wBulb);
     };
 
     const wBulbAutoComputeFn = async (wBulb: string) => {
         const dBulb = formData.temperature.dBulb;
-
-        if (!dBulb || !wBulb) {
-            setField(["temperature", "dPoiint"], "");
-            setField(["temperature", "RH"], "");
-            setField(["temperature", "vaporP"], "");
-            return;
-        }
-
-        const pD = await fetchPsychrometric(dBulb, wBulb);
-
-        if (pD) {
-            const { dPoint, RH, vPressure } = pD;
-
-            console.log(pD);
-
-            setField(["temperature", "dPoiint"], String(dPoint) ?? "");
-            setField(["temperature", "RH"], String(RH) ?? "");
-            setField(["temperature", "vaporP"], String(vPressure) ?? "");
-        }
+        await autoComputePsychrometric(dBulb, wBulb);
     };
 
     const inputRefs = useRef<Record<string, any>>({});
@@ -540,6 +674,9 @@ export default function DataCollectionForm({ dataParams, formData, setField, err
         "clouds.fourthLayer.type",
         "clouds.fourthLayer.height",
         "clouds.ceiling",
+        "clouds.dirLow",
+        "clouds.dirMid",
+        "clouds.dirHigh",
 
         "observer.remark",
         "observer.obsINT"
@@ -560,7 +697,6 @@ export default function DataCollectionForm({ dataParams, formData, setField, err
             const nextKey = fieldOrder[i]
 
             const value = getFieldValue(nextKey)
-            console.log("next value:", value)
 
             // If field already has value → skip it
             if (value !== null && value !== undefined && value !== "") {
@@ -581,10 +717,13 @@ export default function DataCollectionForm({ dataParams, formData, setField, err
     useEffect(() => {
         if (!pendingAdvance) return;
 
-        focusNextEmptyField(pendingAdvance);
-        setPendingAdvance(null);
+        const id = requestAnimationFrame(() => {
+            focusNextEmptyField(pendingAdvance);
+            setPendingAdvance(null);
+        });
 
-    }, [pendingAdvance, formData]);
+        return () => cancelAnimationFrame(id);
+    }, [pendingAdvance]);
 
     return (
         <Box className="flex-1 p-2 gap-2">
@@ -594,164 +733,8 @@ export default function DataCollectionForm({ dataParams, formData, setField, err
                 date={dataParams.date}
                 time={dataParams.time}
                 status={dataParams.status}
-                onSave={async () => {
-                    if (isSaveBtnLoading) return;
-                    setIsSaveBtnLoading(true);
-                    await onSave();
-                    setIsSaveBtnLoading(false);
-                }}
-                onMarkQC={async () => {
-                    if (isSaveBtnLoading) return;
-                    setIsSaveBtnLoading(true);
-
-                    try {
-                        const db = await getDB();
-
-                        // Check if record exists
-                        const existing = await db.runAsync(
-                            `SELECT sID, isValidated FROM synop_data 
-             WHERE stnID = ? AND sDate = ? AND sHour = ?`,
-                            [dataParams.stationId, dataParams.date, dataParams.time]
-                        );
-
-                        if (existing?.isValidated === 1) {
-                            setAlertTitle("Already Validated");
-                            setAlertMessage("This record has already been validated and cannot be modified.");
-                            handleOpenDialog();
-                        }
-
-                        // Prepare record (same as onSave)
-                        const computedTR = await computeObservedPeriod(
-                            db,
-                            dataParams.stationId,
-                            dataParams.date,
-                            dataParams.time
-                        );
-
-                        const record: any = {
-                            stnID: dataParams.stationId,
-                            sDate: dataParams.date,
-                            sHour: dataParams.time,
-                            heightLL: Number(formData.visibility.heightLL) || null,
-                            VV: Number(formData.visibility.VV) || null,
-                            SummTotal: Number(formData.visibility.SummTotal) || null,
-                            wDir: Number(formData.wind.wDir) || null,
-                            wSpd: Number(formData.wind.wSpd) || null,
-                            dBulb: Number(formData.temperature.dBulb) || null,
-                            wBulb: Number(formData.temperature.wBulb) || null,
-                            dPoiint: Number(formData.temperature.dPoiint) || null,
-                            RH: Number(formData.temperature.RH) || null,
-                            vaporP: Number(formData.temperature.vaporP) || null,
-                            maxTemp: Number(formData.temperature.maxTemp) || null,
-                            minTemp: Number(formData.temperature.minTemp) || null,
-                            stnP: Number(formData.pressure.stnP) || null,
-                            mslP: Number(formData.pressure.mslP) || null,
-                            altP: Number(formData.pressure.altP) || null,
-                            tendency: formData.pressure.tendency,
-                            net3hr: Number(formData.pressure.net3hr) || null,
-                            pres24: Number(formData.pressure.pres24) || null,
-                            pAttachTherm: Number(formData.pressure.pAttachTherm) || null,
-                            pObsBaro: Number(formData.pressure.pObsBaro) || null,
-                            pCorrection: Number(formData.pressure.pCorrection) || null,
-                            pBarograph: Number(formData.pressure.pBarograph) || null,
-                            pBaroCorrection: Number(formData.pressure.pBaroCorrection) || null,
-                            RR: formData.atmosphericPhenomena.RR ? Number(formData.atmosphericPhenomena.RR) : null,
-                            tR: computedTR,
-                            presW: formData.atmosphericPhenomena.presW ? Number(formData.atmosphericPhenomena.presW) : null,
-                            pastW1: formData.atmosphericPhenomena.pastW?.[0] != null ? Number(formData.atmosphericPhenomena.pastW[0]) : 0,
-                            pastW2: formData.atmosphericPhenomena.pastW?.[1] != null ? Number(formData.atmosphericPhenomena.pastW[1]) : 0,
-                            amtLC: Number(formData.clouds.amtLC) || null,
-                            amtFirstLayer: Number(formData.clouds.firstLayer.amt) || null,
-                            typeFirstLayer: formData.clouds.firstLayer.type || null,
-                            heightFirstLayer: Number(formData.clouds.firstLayer.height) || null,
-                            amtSecondLayer: Number(formData.clouds.secondLayer.amt) || null,
-                            typeSecondLayer: formData.clouds.secondLayer.type || null,
-                            heightSecondLayer: Number(formData.clouds.secondLayer.height) || null,
-                            amtThirdLayer: Number(formData.clouds.thirdLayer.amt) || null,
-                            typeThirdLayer: formData.clouds.thirdLayer.type || null,
-                            heightThirdLayer: Number(formData.clouds.thirdLayer.height) || null,
-                            amtFourthLayer: Number(formData.clouds.fourthLayer.amt) || null,
-                            typeFourthLayer: formData.clouds.fourthLayer.type || null,
-                            heightFourthLayer: Number(formData.clouds.fourthLayer.height) || null,
-                            ceiling: Number(formData.clouds.ceiling) || null,
-                            dirLow: formData.clouds.dirLow || null,
-                            dirMid: formData.clouds.dirMid || null,
-                            dirHigh: formData.clouds.dirHigh || null,
-                            remark: formData.observer.remark || null,
-                            obsINT: formData.observer.obsINT || null,
-                            summaryDate: dataParams.time === "0000"
-                                ? new Date(new Date().setDate(new Date().getDate() - 1)).toISOString().slice(0, 10)
-                                : new Date().toISOString().slice(0, 10),
-                            isValidated: 1 // 🔥 mark as validated
-                        };
-
-                        await withTransaction(db, async () => {
-                            if (existing) {
-                                // Update existing
-                                await db.runAsync(
-                                    `UPDATE synop_data SET
-                        heightLL=?, VV=?, SummTotal=?, wDir=?, wSpd=?,
-                        dBulb=?, wBulb=?, dPoiint=?, RH=?, vaporP=?,
-                        maxTemp=?, minTemp=?, stnP=?, mslP=?, altP=?,
-                        tendency=?, net3hr=?, pres24=?, pAttachTherm=?,
-                        pObsBaro=?, pCorrection=?, pBarograph=?, pBaroCorrection=?,
-                        RR=?, tR=?, presW=?, pastW1=?, pastW2=?,
-                        amtLC=?, amtFirstLayer=?, typeFirstLayer=?, heightFirstLayer=?,
-                        amtSecondLayer=?, typeSecondLayer=?, heightSecondLayer=?,
-                        amtThirdLayer=?, typeThirdLayer=?, heightThirdLayer=?,
-                        amtFourthLayer=?, typeFourthLayer=?, heightFourthLayer=?,
-                        ceiling=?, dirLow=?, dirMid=?, dirHigh=?, remark=?, obsINT=?, summaryDate=?, isValidated=?
-                     WHERE sID=?`,
-                                    [
-                                        record.heightLL, record.VV, record.SummTotal, record.wDir, record.wSpd,
-                                        record.dBulb, record.wBulb, record.dPoiint, record.RH, record.vaporP,
-                                        record.maxTemp, record.minTemp, record.stnP, record.mslP, record.altP,
-                                        record.tendency, record.net3hr, record.pres24, record.pAttachTherm,
-                                        record.pObsBaro, record.pCorrection, record.pBarograph, record.pBaroCorrection,
-                                        record.RR, record.tR, record.presW, record.pastW1, record.pastW2,
-                                        record.amtLC, record.amtFirstLayer, record.typeFirstLayer, record.heightFirstLayer,
-                                        record.amtSecondLayer, record.typeSecondLayer, record.heightSecondLayer,
-                                        record.amtThirdLayer, record.typeThirdLayer, record.heightThirdLayer,
-                                        record.amtFourthLayer, record.typeFourthLayer, record.heightFourthLayer,
-                                        record.ceiling, record.dirLow, record.dirMid, record.dirHigh, record.remark, record.obsINT, record.summaryDate,
-                                        record.isValidated,
-                                        existing.sID
-                                    ]
-                                );
-                            } else {
-                                // Insert new
-                                await db.runAsync(
-                                    `INSERT INTO synop_data (
-                        stnID, sDate, sHour, heightLL, VV, SummTotal, wDir, wSpd,
-                        dBulb, wBulb, dPoiint, RH, vaporP, maxTemp, minTemp, stnP, mslP, altP,
-                        tendency, net3hr, pres24, pAttachTherm, pObsBaro, pCorrection, pBarograph,
-                        pBaroCorrection, RR, tR, presW, pastW1, pastW2,
-                        amtLC, amtFirstLayer, typeFirstLayer, heightFirstLayer,
-                        amtSecondLayer, typeSecondLayer, heightSecondLayer,
-                        amtThirdLayer, typeThirdLayer, heightThirdLayer,
-                        amtFourthLayer, typeFourthLayer, heightFourthLayer,
-                        ceiling, dirLow, dirMid, dirHigh, remark, obsINT, summaryDate, isValidated
-                    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-                                    Object.values(record)
-                                );
-                            }
-                        });
-
-                        setAlertTitle("Success");
-                        setAlertMessage("Observation saved and marked as validated!");
-                        handleOpenDialog();
-
-                    } catch (err) {
-                        console.error("QC marking failed:", err);
-                        setAlertTitle("Error");
-                        setAlertMessage("Failed to mark QC. Please try again.");
-                        handleOpenDialog();
-                    } finally {
-                        setIsSaveBtnLoading(false);
-                    }
-                }}
                 isSaving={isSaveBtnLoading}
-                isMarkingQC={false}
+                onAction={handleSaveObservation}
             />
 
             <KeyboardAwareScrollView className="flex-1 rounded-xl" automaticallyAdjustKeyboardInsets bottomOffset={10} showsVerticalScrollIndicator={false}>
@@ -764,15 +747,15 @@ export default function DataCollectionForm({ dataParams, formData, setField, err
                     </CategoryGroup>
 
                     <CategoryGroup title="Wind" icon={WindIcon}>
-                        <FormInput label="Direction(Degrees)" value={formData.wind.wDir} maxLength={3} setterFn={(v: string) => setField(["wind", "wDir"], v)} error={errors.wind.wDir} setErrFn={(m: string) => setError(["wind", "wDir"], m)} validateFn={(v: string) => { return validateField(v, "Wind Direction", { numeric: false }) }} fieldKey="wind.wDir" inputRef={(ref: any) => registerRef("wind.wDir", ref)} setPendingAdvance={setPendingAdvance} />
-                        <FormInput label="Speed(MPS)" value={formData.wind.wSpd} maxLength={3} setterFn={(v: string) => setField(["wind", "wSpd"], v)} error={errors.wind.wSpd} setErrFn={(m: string) => setError(["wind", "wSpd"], m)} validateFn={(v: string) => { return validateField(v, "Wind Speed", { numeric: false }) }} fieldKey="wind.wSpd" inputRef={(ref: any) => registerRef("wind.wSpd", ref)} setPendingAdvance={setPendingAdvance} />
+                        <FormInput label="Direction(Degrees)" value={formData.wind.wDir} maxLength={3} setterFn={(v: string) => setField(["wind", "wDir"], v)} error={errors.wind.wDir} setErrFn={(m: string) => setError(["wind", "wDir"], m)} formatFn={formatWind} validateFn={(v: string) => { return validateField(v, "Wind Direction", { numeric: false }) }} fieldKey="wind.wDir" inputRef={(ref: any) => registerRef("wind.wDir", ref)} setPendingAdvance={setPendingAdvance} />
+                        <FormInput label="Speed(MPS)" value={formData.wind.wSpd} maxLength={3} setterFn={(v: string) => setField(["wind", "wSpd"], v)} error={errors.wind.wSpd} setErrFn={(m: string) => setError(["wind", "wSpd"], m)} formatFn={formatWind} validateFn={(v: string) => { return validateField(v, "Wind Speed", { numeric: false }) }} fieldKey="wind.wSpd" inputRef={(ref: any) => registerRef("wind.wSpd", ref)} setPendingAdvance={setPendingAdvance} />
                     </CategoryGroup>
 
                     <CategoryGroup title="Temperature" icon={ThermometerIcon}>
                         <FormInput label="Dry Bulb (°C)" value={formData.temperature.dBulb} maxLength={4} maxTypableChars={3} setterFn={(v: string) => setField(["temperature", "dBulb"], v)} error={errors.temperature.dBulb} setErrFn={(m: string) => setError(["temperature", "dBulb"], m)} formatFn={formatTemp} validateFn={(v: string) => { return validateField(v, "Dry Bulb", { numeric: false }) }} autoComputeFn={dBulbAutoComputeFn} fieldKey="temperature.dBulb" inputRef={(ref: any) => registerRef("temperature.dBulb", ref)} setPendingAdvance={setPendingAdvance} />
                         <FormInput label="Wet Bulb (°C)" value={formData.temperature.wBulb} maxLength={4} maxTypableChars={3} setterFn={(v: string) => setField(["temperature", "wBulb"], v)} error={errors.temperature.wBulb} setErrFn={(m: string) => setError(["temperature", "wBulb"], m)} formatFn={formatTemp} validateFn={(v: string) => { return validateField(v, "Wet Bulb", { numeric: false }) }} autoComputeFn={wBulbAutoComputeFn} fieldKey="temperature.wBulb" inputRef={(ref: any) => registerRef("temperature.wBulb", ref)} setPendingAdvance={setPendingAdvance} />
                         <FormInput label="Dew Point (°C)" value={formData.temperature.dPoiint} maxLength={4} maxTypableChars={3} setterFn={(v: string) => setField(["temperature", "dPoiint"], v)} error={errors.temperature.dPoiint} setErrFn={(m: string) => setError(["temperature", "dPoiint"], m)} formatFn={formatTemp} validateFn={(v: string) => { return validateField(v, "Dew Point", { numeric: false }) }} fieldKey="temperature.dPoiint" inputRef={(ref: any) => registerRef("temperature.dPoiint", ref)} setPendingAdvance={setPendingAdvance} />
-                        <FormInput label="Relative Humidity" value={formData.temperature.RH} maxLength={4} maxTypableChars={2} setterFn={(v: string) => setField(["temperature", "RH"], v)} error={errors.temperature.RH} setErrFn={(m: string) => setError(["temperature", "RH"], m)} formatFn={formatRH} validateFn={(v: string) => { return validateField(v, "Relative Humidity", { numeric: false }) }} fieldKey="temperature.RH" inputRef={(ref: any) => registerRef("temperature.RH", ref)} setPendingAdvance={setPendingAdvance} />
+                        <FormInput label="Relative Humidity (%)" value={formData.temperature.RH} maxLength={4} maxTypableChars={3} setterFn={(v: string) => setField(["temperature", "RH"], v)} error={errors.temperature.RH} setErrFn={(m: string) => setError(["temperature", "RH"], m)} validateFn={(v: string) => { return validateField(v, "Relative Humidity", { numeric: false }) }} fieldKey="temperature.RH" inputRef={(ref: any) => registerRef("temperature.RH", ref)} setPendingAdvance={setPendingAdvance} />
                         <FormInput label="Vapor Pressure" value={formData.temperature.vaporP} maxLength={6} maxTypableChars={4} setterFn={(v: string) => setField(["temperature", "vaporP"], v)} error={errors.temperature.vaporP} setErrFn={(m: string) => setError(["temperature", "vaporP"], m)} formatFn={formatVaporP} validateFn={(v: string) => { return validateField(v, "Vapor Pressure", { numeric: false }) }} fieldKey="temperature.vaporP" inputRef={(ref: any) => registerRef("temperature.vaporP", ref)} setPendingAdvance={setPendingAdvance} />
                         <FormInput label="Max. Temperature" value={formData.temperature.maxTemp} maxLength={4} maxTypableChars={3} setterFn={(v: string) => setField(["temperature", "maxTemp"], v)} error={errors.temperature.maxTemp} setErrFn={(m: string) => setError(["temperature", "maxTemp"], m)} formatFn={formatTemp} validateFn={(v: string) => { return validateMaxTemp(dataParams.stationId, dataParams.date, dataParams.time, v, formData.temperature.dBulb) }} fieldKey="temperature.maxTemp" inputRef={(ref: any) => registerRef("temperature.maxTemp", ref)} setPendingAdvance={setPendingAdvance} />
                         <FormInput label="Min. Temperature" value={formData.temperature.minTemp} maxLength={4} maxTypableChars={3} setterFn={(v: string) => setField(["temperature", "minTemp"], v)} error={errors.temperature.minTemp} setErrFn={(m: string) => setError(["temperature", "minTemp"], m)} formatFn={formatTemp} validateFn={(v: string) => { return validateMinTemp(dataParams.stationId, dataParams.date, dataParams.time, v, formData.temperature.dBulb) }} fieldKey="temperature.minTemp" inputRef={(ref: any) => registerRef("temperature.minTemp", ref)} setPendingAdvance={setPendingAdvance} />
@@ -913,6 +896,7 @@ export default function DataCollectionForm({ dataParams, formData, setField, err
                                 );
                                 setError(["clouds", "dirLow"], isValid ? "" : error || "");
                             }}
+                            fieldKey="clouds.dirLow" setPendingAdvance={setPendingAdvance}
                         />
 
                         <CloudDirInput
@@ -927,6 +911,7 @@ export default function DataCollectionForm({ dataParams, formData, setField, err
                                 );
                                 setError(["clouds", "dirMid"], isValid ? "" : error || "");
                             }}
+                            fieldKey="clouds.dirMid" setPendingAdvance={setPendingAdvance}
                         />
 
                         <CloudDirInput
@@ -941,12 +926,13 @@ export default function DataCollectionForm({ dataParams, formData, setField, err
                                 );
                                 setError(["clouds", "dirHigh"], isValid ? "" : error || "");
                             }}
+                            fieldKey="clouds.dirHigh" setPendingAdvance={setPendingAdvance}
                         />
                     </CategoryGroup>
 
                     <CategoryGroup title="Remarks and Signature" icon={FileText}>
-                        <FormTextarea label="Remarks" value={formData.observer.remark} maxLength={255} setterFn={(v: string) => setField(["observer", "remark"], v)} error={errors.observer.remark} setErrFn={(m: string) => setError(["observer", "remark"], m)} />
-                        <FormInput label="Observer's Signature" value={formData.observer.obsINT} setterFn={(v: string) => setField(["observer", "obsINT"], v)} error={errors.observer.obsINT} setErrFn={(m: string) => setError(["observer", "obsINT"], m)} isAlphanumeric={true} validateFn={(v: string) => { return validateField(v, "Observer's Signature", { required: true }) }} />
+                        <FormTextarea label="Remarks" value={formData.observer.remark} maxLength={255} setterFn={(v: string) => setField(["observer", "remark"], v)} error={errors.observer.remark} setErrFn={(m: string) => setError(["observer", "remark"], m)} fieldKey="observer.remark" inputRef={(ref: any) => registerRef("observer.remark", ref)} setPendingAdvance={setPendingAdvance} />
+                        <FormInput label="Observer's Signature" value={formData.observer.obsINT} setterFn={(v: string) => setField(["observer", "obsINT"], v)} error={errors.observer.obsINT} setErrFn={(m: string) => setError(["observer", "obsINT"], m)} isAlphanumeric={true} validateFn={(v: string) => { return validateField(v, "Observer's Signature", { required: true }) }} fieldKey="observer.obsINT" inputRef={(ref: any) => registerRef("observer.obsINT", ref)} setPendingAdvance={setPendingAdvance} />
                     </CategoryGroup>
                 </Box>
             </KeyboardAwareScrollView>

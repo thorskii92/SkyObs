@@ -17,7 +17,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Divider } from "@/components/ui/divider";
 import { Icon } from "@/components/ui/icon";
 import SmsDetailModal from "@/src/components/SmsDetailModal";
-import { getDB, getLSmsLogs, insertLSmsLog, testSmsLogsTable } from "@/src/utils/db";
+import { getDB, getLSmsLogs, testSmsLogsTable } from "@/src/utils/db";
 import { formatDate } from "@/src/utils/formatters";
 
 interface SmsLog {
@@ -26,7 +26,13 @@ interface SmsLog {
     uId: number;
     status: string;
     msg: string;
-    recip: string;
+    recip_num: string;
+    recip_name?: string;
+    category: string;
+
+    obsDate: string;   // ✅ NEW
+    obsHour: string;   // ✅ NEW
+
     dateSent: string;
     channel: string;
     stnName?: string;
@@ -42,6 +48,7 @@ export default function SmsHistoryScreen() {
 
     // Filters
     const [statusFilter, setStatusFilter] = useState<string>("");
+    const [categoryFilter, setCategoryFilter] = useState<string>("");
     const [recipientFilter, setRecipientFilter] = useState<string>("");
     const [dateFrom, setDateFrom] = useState<Date | null>(null);
     const [dateTo, setDateTo] = useState<Date | null>(null);
@@ -59,19 +66,22 @@ export default function SmsHistoryScreen() {
         try {
             const db = await getDB();
 
-            // Test the SMS logs table
             await testSmsLogsTable(db);
 
             const offset = (currentPage - 1) * pageSize;
+
             const filters = {
                 status: statusFilter || undefined,
+                category: categoryFilter || undefined, // ✅ added
                 recip: recipientFilter || undefined,
                 dateFrom: dateFrom ? formatDate(dateFrom) : undefined,
                 dateTo: dateTo ? formatDate(dateTo) : undefined,
                 limit: pageSize,
                 offset: offset,
             };
+
             const result = await getLSmsLogs(db, filters, sortBy, sortOrder);
+
             setSmsLogs(result.data);
             setTotalItems(result.total);
             setTotalPages(Math.ceil(result.total / pageSize));
@@ -120,8 +130,10 @@ export default function SmsHistoryScreen() {
         setShowDetailModal(true);
     };
 
-    const getStatusColor = (status: string) => {
-        switch (status.toLowerCase()) {
+    const getStatusColor = (status?: string) => {
+        const s = status?.toLowerCase() || "unknown";
+
+        switch (s) {
             case 'success':
             case 'sent':
                 return 'bg-green-100 text-green-800';
@@ -151,10 +163,11 @@ export default function SmsHistoryScreen() {
         }
     };
 
-    const [showFilters, setShowFilters] = useState(true);
+    const [showFilters, setShowFilters] = useState(false);
 
     const clearFilters = async () => {
         setStatusFilter("");
+        setCategoryFilter("");
         setRecipientFilter("");
         setDateFrom(null);
         setDateTo(null);
@@ -228,6 +241,33 @@ export default function SmsHistoryScreen() {
 
                                     <FormControl className="flex-1">
                                         <FormControlLabel>
+                                            <FormControlLabelText>Category</FormControlLabelText>
+                                        </FormControlLabel>
+                                        <Select
+                                            selectedValue={categoryFilter}
+                                            onValueChange={setCategoryFilter}
+                                        >
+                                            <SelectTrigger>
+                                                <SelectInput placeholder="All Categories" />
+                                                <SelectIcon as={ChevronDownIcon} />
+                                            </SelectTrigger>
+                                            <SelectPortal>
+                                                <SelectBackdrop />
+                                                <SelectContent>
+                                                    <SelectDragIndicatorWrapper>
+                                                        <SelectDragIndicator />
+                                                    </SelectDragIndicatorWrapper>
+                                                    <SelectItem label="All" value="" />
+                                                    <SelectItem label="SYNOP" value="SYNOP" />
+                                                    <SelectItem label="METAR" value="METAR" />
+                                                    <SelectItem label="SPECI" value="SPECI" />
+                                                </SelectContent>
+                                            </SelectPortal>
+                                        </Select>
+                                    </FormControl>
+
+                                    <FormControl className="flex-1">
+                                        <FormControlLabel>
                                             <FormControlLabelText>Sort By</FormControlLabelText>
                                         </FormControlLabel>
                                         <Select
@@ -246,7 +286,9 @@ export default function SmsHistoryScreen() {
                                                     </SelectDragIndicatorWrapper>
                                                     <SelectItem label="Date Sent" value="dateSent" />
                                                     <SelectItem label="Status" value="status" />
-                                                    <SelectItem label="Recipient" value="recip" />
+                                                    <SelectItem label="Recipient Name" value="recip_name" />
+                                                    <SelectItem label="Recipient Number" value="recip_num" />
+                                                    <SelectItem label="Category" value="category" />
                                                     <SelectItem label="Station" value="stnId" />
                                                 </SelectContent>
                                             </SelectPortal>
@@ -359,31 +401,6 @@ export default function SmsHistoryScreen() {
                                 <Button onPress={clearFilters} variant="outline" size="sm">
                                     <ButtonText>Clear Filters</ButtonText>
                                 </Button>
-
-                                <Button
-                                    onPress={async () => {
-                                        try {
-                                            const db = await getDB();
-                                            const testMessage = `Test SMS message from SkyObs - ${Date.now()}`;
-                                            await insertLSmsLog(db, {
-                                                stnId: 1,
-                                                status: "success",
-                                                msg: testMessage,
-                                                recip: "09123456789",
-                                            });
-                                            Alert.alert("Success", "Test SMS log added");
-                                            fetchSmsLogs(); // Refresh the list
-                                        } catch (error) {
-                                            console.error("Error adding test SMS:", error);
-                                            Alert.alert("Error", "Failed to add test SMS");
-                                        }
-                                    }}
-                                    variant="solid"
-                                    size="sm"
-                                    className="bg-blue-500"
-                                >
-                                    <ButtonText>Add Test SMS</ButtonText>
-                                </Button>
                             </>
                         )}
                     </VStack>
@@ -391,34 +408,52 @@ export default function SmsHistoryScreen() {
                     {/* SMS Logs Table */}
                     <Box className="border border-gray-200 rounded-lg overflow-hidden">
                         {isLoading ? (
-                            <Box className="p-4 items-center">
+                            <Box className="p-6 items-center">
                                 <Text className="text-gray-500">Loading SMS history...</Text>
                             </Box>
                         ) : smsLogs.length === 0 ? (
-                            <Box className="p-4 items-center">
+                            <Box className="p-6 items-center">
                                 <Text className="text-gray-500">No SMS records found</Text>
                             </Box>
                         ) : (
                             <ScrollView horizontal showsHorizontalScrollIndicator={false}>
-                                <Box className="min-w-[800px]">
+                                <Box className="min-w-[950px]">
+
                                     <TableHeader className="bg-gray-50">
                                         <TableRow>
-                                            <TableHead className="p-3 font-medium w-[120px] text-xs">
-                                                Date Sent
+                                            <TableHead className="p-2 w-[200px] text-xs">
+                                                Observation
                                             </TableHead>
-                                            <TableHead className="p-3 font-medium w-[100px] text-xs">
+
+                                            <TableHead className="p-2 w-[160px] text-xs">
+                                                Sent
+                                            </TableHead>
+
+                                            <TableHead className="p-2 w-[100px] text-xs">
+                                                Category
+                                            </TableHead>
+
+                                            <TableHead className="p-2 w-[90px] text-xs">
                                                 Status
                                             </TableHead>
-                                            <TableHead className="p-3 font-medium w-[120px] text-xs">
+
+                                            <TableHead className="p-2 w-[140px] text-xs">
                                                 Recipient
                                             </TableHead>
-                                            <TableHead className="p-3 font-medium w-[120px] text-xs">
+
+                                            <TableHead className="p-2 w-[120px] text-xs">
+                                                Number
+                                            </TableHead>
+
+                                            <TableHead className="p-2 w-[130px] text-xs">
                                                 Station
                                             </TableHead>
-                                            <TableHead className="p-3 font-medium w-[200px] text-xs">
+
+                                            <TableHead className="p-2 w-[250px] text-xs">
                                                 Message
                                             </TableHead>
-                                            <TableHead className="p-3 font-medium w-[80px] text-xs">
+
+                                            <TableHead className="p-2 w-[80px] text-xs text-center">
                                                 Actions
                                             </TableHead>
                                         </TableRow>
@@ -426,23 +461,46 @@ export default function SmsHistoryScreen() {
 
                                     <FlatList
                                         data={smsLogs}
-                                        keyExtractor={(item) => (item.smsId || item.recip + item.dateSent).toString()}
+                                        keyExtractor={(item) => `${item.smsId}-${item.recip_num}-${item.dateSent}`}
                                         renderItem={({ item, index }) => (
                                             <TableRow className={index % 2 === 0 ? "bg-white" : "bg-gray-50"}>
                                                 <TableData className="p-3 text-xs">
+                                                    <Text className="font-semibold">
+                                                        {item.category} - {item.obsHour}
+                                                    </Text>
+                                                    <Text className="text-[10px] text-gray-500">
+                                                        {item.obsDate}
+                                                    </Text>
+                                                </TableData>
+
+                                                <TableData className="p-3 text-xs">
                                                     {formatDateTime(item.dateSent || "")}
                                                 </TableData>
+
                                                 <TableData className="p-3">
                                                     <Badge className={`px-2 py-1 rounded-full text-xs font-medium ${getStatusColor(item.status || "unknown")}`}>
-                                                        <BadgeText size="sm">{item.status || "unknown"}</BadgeText>
+                                                        <BadgeText size="sm">
+                                                            {item.status || "unknown"}
+                                                        </BadgeText>
                                                     </Badge>
                                                 </TableData>
+
                                                 <TableData className="p-3 text-xs">
-                                                    {item.recip || ""}
+                                                    <Text className="text-xs font-bold">
+                                                        {item.recip_name || "Unknown"}
+                                                    </Text>
                                                 </TableData>
+
+                                                <TableData className="p-3 text-xs">
+                                                    <Text className="text-[10px] text-gray-500">
+                                                        {item.recip_num}
+                                                    </Text>
+                                                </TableData>
+
                                                 <TableData className="p-3 text-xs">
                                                     {item.stnName || item.ICAO || `Station ${item.stnId || ""}`}
                                                 </TableData>
+
                                                 <TableData className="p-3 text-xs max-w-[200px]">
                                                     <Text numberOfLines={2} className="text-xs">
                                                         {item.msg || ""}

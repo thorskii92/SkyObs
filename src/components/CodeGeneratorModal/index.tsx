@@ -20,6 +20,7 @@ import { Icon } from "@/components/ui/icon";
 import { Pressable } from "@/components/ui/pressable";
 import { Text } from "@/components/ui/text";
 import { Textarea, TextareaInput } from "@/components/ui/textarea";
+import { useUser } from "@/src/context/UserContext";
 import generateCodeFromTemplate from "@/src/utils/code_generation";
 import { checkSmsExists, getDB, insertLSmsLog } from "@/src/utils/db";
 import { getSimCards, sendSms } from "expo-android-sms-sender";
@@ -45,15 +46,17 @@ interface CodeGeneratorModalProps {
     onClose: () => void;
     categories: Category[];
     observedData?: Record<string, any>;
-    recipients?: string[];
+    recipientsByCategory?: Record<string, { num: string; name?: string }[]>;
 }
 
 export default function CodeGeneratorModal({
     visible,
     onClose,
     observedData = {},
-    recipients = [],
+    recipientsByCategory,
 }: CodeGeneratorModalProps) {
+    const { user } = useUser();
+
     // Change activeTab state type
     const [activeTab, setActiveTab] = useState<Category | null>(null);
 
@@ -88,6 +91,12 @@ export default function CodeGeneratorModal({
 
     // Default active tab: store the full object
     useEffect(() => {
+        if (visible && categoryKeys.length > 0) {
+            setActiveTab(categoryKeys[0]);
+        }
+    }, [visible, categoryKeys]);
+
+    useEffect(() => {
         if (categoryKeys.length > 0 && !activeTab) {
             setActiveTab(categoryKeys[0]);
         }
@@ -99,7 +108,7 @@ export default function CodeGeneratorModal({
 
         const loadCode = async () => {
             const db = await getDB();
-            const stnID = "1";
+            const stnID = String(user?.station_id);
             const hour = observedData?.sHour?.slice(0, 2) ?? "00";
 
             const code = await generateCodeFromTemplate(db, stnID, hour, activeTab, observedData);
@@ -109,7 +118,13 @@ export default function CodeGeneratorModal({
             );
         };
         loadCode();
+        setSendError(null);
     }, [visible, activeTab, observedData]);
+
+    const recipients = useMemo(() => {
+        if (!activeTab || !recipientsByCategory) return [];
+        return recipientsByCategory[activeTab.cName.toUpperCase()] || [];
+    }, [activeTab, recipientsByCategory]);
 
     const defaultGeneratedCode = "";
 
@@ -118,6 +133,7 @@ export default function CodeGeneratorModal({
     const [isSending, setIsSending] = useState<boolean>(false);
     const [sendStatus, setSendStatus] = useState<Record<string, string>>({});
     const [hasSentMessages, setHasSentMessages] = useState<boolean>(false);
+    const [sendError, setSendError] = useState<string | null>(null);
     const [alreadySentRecipients, setAlreadySentRecipients] = useState<Set<string>>(new Set());
 
     const [dotCount, setDotCount] = useState(0);
@@ -149,6 +165,7 @@ export default function CodeGeneratorModal({
         setSendStatus({});
         setHasSentMessages(false);
         setAlreadySentRecipients(new Set());
+        setActiveTab(null);
         onClose?.();
     };
 
@@ -180,14 +197,16 @@ export default function CodeGeneratorModal({
                 const db = await getDB();
                 const sentRecipients = new Set<string>();
 
-                const isSynop = activeTab?.cName === 'SYNOP';
-                const recordId = isSynop ? observedData?.sID : observedData?.metID;
-                const idType = isSynop ? 'sId' : 'metId';
+                for (const r of recipients) {
+                    const exists = await checkSmsExists(
+                        db,
+                        generatedCode,
+                        r.num,
+                        activeTab?.cName || ""
+                    );
 
-                for (const recipient of recipients) {
-                    const exists = await checkSmsExists(db, generatedCode, recipient, "success", recordId, idType);
                     if (exists) {
-                        sentRecipients.add(recipient);
+                        sentRecipients.add(r.num);
                     }
                 }
 
@@ -201,122 +220,140 @@ export default function CodeGeneratorModal({
         checkExistingSms();
     }, [visible, generatedCode, recipients, activeTab, observedData]);
 
-    const sendTxtMsg = async (recipients: string[], bodySMS: string) => {
+    const sendTxtMsg = async (
+        recipients: { num: string; name?: string }[],
+        bodySMS: string
+    ) => {
         if (bodySMS.length > 160) {
             alert("Cannot send code: exceeds 160 characters.");
             return;
         }
 
+        let didProcess = false;
+
         try {
             setIsSending(true);
+
             const initialStatus: Record<string, string> = {};
-            recipients.forEach((num) => (initialStatus[num] = "pending"));
+            recipients.forEach((r) => (initialStatus[r.num] = "pending"));
             setSendStatus(initialStatus);
 
             const phoneStatePermission = await PermissionsAndroid.request(
                 PermissionsAndroid.PERMISSIONS.READ_PHONE_STATE
             );
-            if (phoneStatePermission !== PermissionsAndroid.RESULTS.GRANTED) return;
-
+            if (phoneStatePermission !== PermissionsAndroid.RESULTS.GRANTED) {
+                setSendError("SMS permission denied.");
+                return;
+            }
             const smsPermission = await PermissionsAndroid.request(
                 PermissionsAndroid.PERMISSIONS.SEND_SMS
             );
-            if (smsPermission !== PermissionsAndroid.RESULTS.GRANTED) return;
+            if (smsPermission !== PermissionsAndroid.RESULTS.GRANTED) {
+                setSendError("SMS permission denied.");
+                return;
+            };
 
             const sims: SimCard[] = await getSimCards();
-            if (!sims?.length) return;
+
+            if (!sims?.length) {
+                const failedStatus: Record<string, string> = {};
+                recipients.forEach((r) => (failedStatus[r.num] = "failed"));
+                setSendStatus(failedStatus);
+
+                setSendError("No SIM card detected. Cannot send SMS.");
+                setHasSentMessages(true); // now UI shows failure state properly
+                return;
+            }
             const simId = sims[0]?.id;
 
-            // Get database connection for logging
             const db = await getDB();
-            const stnId = observedData?.stnID || 1; // Get station ID from observed data
+            const stnId = observedData?.stnID || 1;
 
-            const isSynop = activeTab?.cName === 'SYNOP';
-            const recordId = isSynop ? observedData?.sID : observedData?.metID;
+            const category = activeTab?.cName || "UNKNOWN"; // ✅ NEW
 
-            for (const number of recipients) {
-                // Skip if already sent
+            const obsDate = observedData?.sDate; // already YYYY-MM-DD
+
+            // Convert sHour → "HH00"
+            const rawHour = observedData?.sHour ?? "00";
+            const obsHour =
+                rawHour.length === 4
+                    ? rawHour // already "HHMM"
+                    : rawHour.toString().padStart(2, "0") + "00";
+
+            for (const r of recipients) {
+                const number = r.num;
+
                 if (alreadySentRecipients.has(number)) {
                     setSendStatus((prev) => ({ ...prev, [number]: "already_sent" }));
                     continue;
                 }
 
                 setSendStatus((prev) => ({ ...prev, [number]: "sending" }));
+
                 if (!bodySMS) {
                     setSendStatus((prev) => ({ ...prev, [number]: "failed" }));
-                    // Log failed attempt
-                    try {
-                        await insertLSmsLog(db, {
-                            stnId,
-                            sId: isSynop ? recordId : undefined,
-                            metId: !isSynop ? recordId : undefined,
-                            status: "failed",
-                            msg: bodySMS,
-                            recip: number,
-                            channel: activeTab?.cName,
-                        });
-                    } catch (logError) {
-                        console.error("Error logging failed SMS:", logError);
-                    }
+
+                    await insertLSmsLog(db, {
+                        stnId,
+                        category,
+                        status: "failed",
+                        msg: bodySMS,
+                        recip_num: number,
+                        recip_name: r.name,
+
+                        obsDate,          // ✅ NEW
+                        obsHour,          // ✅ NEW
+
+                        channel: category,
+                    });
+
                     continue;
                 }
+
                 try {
                     await sendSms(number, bodySMS, simId);
+
                     setSendStatus((prev) => ({ ...prev, [number]: "sent" }));
-                    // Log successful send
-                    try {
-                        await insertLSmsLog(db, {
-                            stnId,
-                            sId: isSynop ? recordId : undefined,
-                            metId: !isSynop ? recordId : undefined,
-                            status: "success",
-                            msg: bodySMS,
-                            recip: number,
-                            channel: activeTab?.cName,
-                        });
-                    } catch (logError) {
-                        console.error("Error logging successful SMS:", logError);
-                    }
+
+                    await insertLSmsLog(db, {
+                        stnId,
+                        category,
+                        status: "success",
+                        msg: bodySMS,
+                        recip_num: number,
+                        recip_name: r.name,
+
+                        obsDate,          // ✅ NEW
+                        obsHour,          // ✅ NEW
+
+                        channel: category,
+                    });
+
                 } catch {
-                    try {
-                        await sendSms(number, bodySMS);
-                        setSendStatus((prev) => ({ ...prev, [number]: "sent" }));
-                        // Log successful send (fallback)
-                        try {
-                            await insertLSmsLog(db, {
-                                stnId,
-                                sId: isSynop ? recordId : undefined,
-                                metId: !isSynop ? recordId : undefined,
-                                status: "success",
-                                msg: bodySMS,
-                                recip: number,
-                                channel: activeTab?.cName,
-                            });
-                        } catch (logError) {
-                            console.error("Error logging successful SMS:", logError);
-                        }
-                    } catch {
-                        setSendStatus((prev) => ({ ...prev, [number]: "failed" }));
-                        // Log failed attempt
-                        try {
-                            await insertLSmsLog(db, {
-                                stnId,
-                                sId: isSynop ? recordId : undefined,
-                                metId: !isSynop ? recordId : undefined,
-                                status: "failed",
-                                msg: bodySMS,
-                                recip: number,
-                                channel: activeTab?.cName,
-                            });
-                        } catch (logError) {
-                            console.error("Error logging failed SMS:", logError);
-                        }
-                    }
+                    setSendStatus((prev) => ({ ...prev, [number]: "failed" }));
+
+                    await insertLSmsLog(db, {
+                        stnId,
+                        category,
+                        status: "failed",
+                        msg: bodySMS,
+                        recip_num: number,
+                        recip_name: r.name,
+
+                        obsDate,          // ✅ NEW
+                        obsHour,          // ✅ NEW
+
+                        channel: category,
+                    });
                 }
             }
+
+            didProcess = true;
         } finally {
             setIsSending(false);
-            setHasSentMessages(true);
+            if (didProcess) {
+                setHasSentMessages(true);
+            }
         }
     };
 
@@ -337,10 +374,28 @@ export default function CodeGeneratorModal({
         return date.toLocaleDateString(undefined, options);
     }
 
+    const [selection, setSelection] = useState({ start: 0, end: 0 });
+
     const isPlaceholder = generatedCode === "No generated code available";
     const isTooLong = generatedCode.length > 160;
     const isEmpty = generatedCode.trim().length === 0;
     const isValid = !isEmpty && !isTooLong;
+
+    const statusValues = Object.values(sendStatus);
+
+    const hasAnySent = statusValues.includes("sent");
+    const hasAnyFailed = statusValues.includes("failed");
+    const hasAnyPendingOrSending = statusValues.some(
+        (s) => s === "pending" || s === "sending"
+    );
+
+    const isAllSuccess =
+        statusValues.length > 0 &&
+        statusValues.every((s) => s === "sent" || s === "already_sent");
+
+    const isAllFailed =
+        statusValues.length > 0 &&
+        statusValues.every((s) => s === "failed");
 
     return (
         <AlertDialog isOpen={isOpen} onClose={isSending ? () => { } : handleClose}>
@@ -404,24 +459,26 @@ export default function CodeGeneratorModal({
                                     contentContainerStyle={{ flexDirection: 'row', gap: 4 }}
                                 >
                                     {recipients.map((r) => {
-                                        const status = sendStatus[r] || (alreadySentRecipients.has(r) ? "already_sent" : "pending");
+                                        const status = sendStatus[r.num] || (alreadySentRecipients.has(r.num) ? "already_sent" : "pending");
 
                                         let action: "info" | "success" | "error" | "warning" = "info";
 
                                         if (status === "sent") action = "success";
                                         else if (status === "failed") action = "error";
                                         else if (status === "sending") action = "warning";
-                                        else if (status === "already_sent") action = "success"; // Show as success but indicate it's already sent
+                                        else if (status === "already_sent") action = "success";
 
                                         return (
                                             <Badge
-                                                key={r}
+                                                key={r.num}
                                                 size="sm"
                                                 action={action}
                                                 className="p-2 rounded"
                                             >
-                                                <BadgeText size="sm" italic>
-                                                    {status === "already_sent" ? `${r} ✓` : r}
+                                                <BadgeText size="sm" italic bold>
+                                                    {status === "already_sent"
+                                                        ? `${r.name || r.num} ✓`
+                                                        : (r.name || r.num)}
                                                 </BadgeText>
                                             </Badge>
                                         );
@@ -429,6 +486,15 @@ export default function CodeGeneratorModal({
                                 </ScrollView>
                             </Box>
                         )}
+
+                        {recipients.length === 0 && (
+                            <Box className="p-2 bg-gray-100 rounded-lg my-2">
+                                <Text className="text-sm text-gray-400 italic">
+                                    No recipients configured for this category.
+                                </Text>
+                            </Box>
+                        )}
+
                         {/* Generated Code */}
                         <FormControl
                             isInvalid={isTooLong || isEmpty}
@@ -441,9 +507,11 @@ export default function CodeGeneratorModal({
                                 <TextareaInput
                                     ref={textareaRef}
                                     value={generatedCode}
-                                    onChangeText={setGeneratedCode}
+                                    onChangeText={(text) => setGeneratedCode(text)}
                                     multiline
                                     editable={editMode}
+                                    selection={selection}
+                                    onSelectionChange={(e) => setSelection(e.nativeEvent.selection)}
                                     className={`text-sm p-2 h-32 ${isPlaceholder ? "text-gray-400 italic" : "text-gray-800"
                                         }`}
                                     style={{ textAlignVertical: "top" }}
@@ -502,22 +570,37 @@ export default function CodeGeneratorModal({
                                 <Box className="w-full items-center py-2">
                                     {(() => {
                                         const currentRecipient = recipients.find(
-                                            (r) => sendStatus[r] === "sending" || sendStatus[r] === "pending"
+                                            (r) =>
+                                                sendStatus[r.num] === "sending" ||
+                                                sendStatus[r.num] === "pending"
                                         );
 
-                                        const fallbackRecipient = recipients.find((r) => sendStatus[r] === "sent" || sendStatus[r] === "failed" || sendStatus[r] === "already_sent");
+                                        const fallbackRecipient = recipients.find(
+                                            (r) =>
+                                                sendStatus[r.num] === "sent" ||
+                                                sendStatus[r.num] === "failed" ||
+                                                sendStatus[r.num] === "already_sent"
+                                        );
 
                                         const displayRecipient = currentRecipient || fallbackRecipient;
 
+                                        if (!displayRecipient) return null;
+
+                                        const status = sendStatus[displayRecipient.num];
+                                        const displayName = displayRecipient.name || displayRecipient.num;
+
                                         let displayText = "";
-                                        if (!displayRecipient) displayText = "";
-                                        else {
-                                            const status = sendStatus[displayRecipient];
-                                            if (status === "sending") displayText = `Sending to ${displayRecipient}${".".repeat(dotCount)}`;
-                                            else if (status === "sent") displayText = `Sent to ${displayRecipient}`;
-                                            else if (status === "failed") displayText = `Failed to send to ${displayRecipient}`;
-                                            else if (status === "already_sent") displayText = `Already sent to ${displayRecipient}`;
-                                            else displayText = `Pending: ${displayRecipient}`;
+
+                                        if (status === "sending") {
+                                            displayText = `Sending to ${displayName}${".".repeat(dotCount)}`;
+                                        } else if (status === "sent") {
+                                            displayText = `Sent to ${displayName}`;
+                                        } else if (status === "failed") {
+                                            displayText = `Failed to send to ${displayName}`;
+                                        } else if (status === "already_sent") {
+                                            displayText = `Already sent to ${displayName}`;
+                                        } else {
+                                            displayText = `Pending: ${displayName}`;
                                         }
 
                                         return (
@@ -527,33 +610,65 @@ export default function CodeGeneratorModal({
                                         );
                                     })()}
                                 </Box>
+                            ) : sendError ? (
+                                <Box className="w-full items-center py-2">
+                                    <Text className="text-center text-sm font-medium text-red-600">
+                                        {sendError}
+                                    </Text>
+                                </Box>
                             ) : hasSentMessages ? (
                                 <Box className="w-full items-center py-2">
-                                    <Text className="text-center text-green-600 text-sm font-medium">
-                                        Messages sent and logged to history
-                                    </Text>
-                                    <Button
-                                        size="sm"
-                                        variant="outline"
-                                        className="mt-2 w-full"
-                                        onPress={() => {
-                                            setHasSentMessages(false);
-                                            setSendStatus({});
-                                            setAlreadySentRecipients(new Set());
-                                        }}
+                                    <Text
+                                        className={`text-center text-sm font-medium ${isAllSuccess
+                                            ? "text-green-600"
+                                            : isAllFailed
+                                                ? "text-red-600"
+                                                : hasAnyFailed
+                                                    ? "text-yellow-600"
+                                                    : "text-gray-600"
+                                            }`}
                                     >
-                                        <ButtonText>Send Again</ButtonText>
-                                    </Button>
+                                        {isAllSuccess
+                                            ? "All messages sent successfully"
+                                            : isAllFailed
+                                                ? "All messages failed to send"
+                                                : hasAnyFailed
+                                                    ? "Some messages failed to send"
+                                                    : "Processing complete"}
+                                    </Text>
+
+                                    {hasAnyFailed && (
+                                        <Button
+                                            size="sm"
+                                            variant="outline"
+                                            className="mt-2 w-full"
+                                            onPress={() => {
+                                                const failedRecipients = recipients.filter(
+                                                    (r) => sendStatus[r.num] === "failed"
+                                                );
+
+                                                setHasSentMessages(false);
+                                                setSendStatus({});
+                                                setAlreadySentRecipients(new Set());
+
+                                                sendTxtMsg(failedRecipients, generatedCode);
+                                            }}
+                                        >
+                                            <ButtonText>
+                                                {isAllFailed ? "Retry All" : "Retry Failed"}
+                                            </ButtonText>
+                                        </Button>
+                                    )}
                                 </Box>
                             ) : (
                                 <Button
                                     size="sm"
                                     className="w-full bg-blue-400 py-3"
                                     onPress={() => sendTxtMsg(recipients, generatedCode)}
-                                    disabled={!isValid || editMode || recipients.every(r => alreadySentRecipients.has(r))}
+                                    disabled={!isValid || editMode || recipients.every(r => alreadySentRecipients.has(r.num))}
                                 >
                                     <ButtonText className="text-white font-semibold text-center">
-                                        {recipients.every(r => alreadySentRecipients.has(r)) ? "All Recipients Already Have This Message" : "Send SMS"}
+                                        {recipients.every(r => alreadySentRecipients.has(r.num)) ? "All Recipients Already Have This Message" : "Send SMS"}
                                     </ButtonText>
                                 </Button>
                             )}

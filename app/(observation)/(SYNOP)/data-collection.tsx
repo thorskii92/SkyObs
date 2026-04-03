@@ -66,9 +66,9 @@ export default function DataCollectionScreen() {
             thirdLayer: { amt: "", type: "", height: "" },
             fourthLayer: { amt: "", type: "", height: "" },
             ceiling: "",
-            dirLow: "",
-            dirMid: "",
-            dirHigh: "",
+            dirLow: "ND",
+            dirMid: "ND",
+            dirHigh: "ND",
         },
         atmosphericPhenomena: {
             RR: "",

@@ -36,6 +36,9 @@ interface CompassDialInputProps {
     value: string;
     onChange: (val: string) => void;
     disabled?: boolean;
+
+    fieldKey?: string;
+    setPendingAdvance: React.Dispatch<React.SetStateAction<string | null>>;
 }
 
 const compassSize = 150;
@@ -70,8 +73,35 @@ export default function CloudDirInput({
     value = "",
     onChange,
     disabled = false,
+    fieldKey,
+    setPendingAdvance,
 }: CompassDialInputProps) {
     const [isOpen, setIsOpen] = useState(false);
+
+    const openDialog = () => {
+        // Cancel any pending auto focus when user manually interacts
+        setPendingAdvance(null);
+        setIsOpen(true);
+    };
+
+    const selectDirection = (dir: string) => {
+        onChange(dir);
+        setIsOpen(false);
+
+        // Move to next field after selection
+        setTimeout(() => {
+            setPendingAdvance(fieldKey ?? null);
+        }, 100);
+    };
+
+    const clearDirection = () => {
+        onChange("");
+        setIsOpen(false);
+
+        setTimeout(() => {
+            setPendingAdvance(fieldKey ?? null);
+        }, 100);
+    };
 
     return (
         <>
@@ -89,7 +119,7 @@ export default function CloudDirInput({
                 <Pressable
                     disabled={disabled}
                     className="flex-1"
-                    onPress={() => setIsOpen(true)}
+                    onPress={openDialog}
                 >
                     <Box pointerEvents="none">
                         <Input isReadOnly isDisabled={disabled}>
@@ -146,32 +176,26 @@ export default function CloudDirInput({
                                 {/* Direction Buttons */}
                                 {Object.entries(DIRECTION_POSITIONS).map(
                                     ([dir, pos]) => {
-                                        const dirIcon =
-                                            DIRECTION_ICONS[dir];
-                                        const isActive =
-                                            value === dir;
+                                        const dirIcon = DIRECTION_ICONS[dir];
+                                        const isActive = value === dir;
 
                                         return (
                                             <Pressable
                                                 key={dir}
-                                                className={`absolute -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full ${isActive
-                                                    ? "bg-blue-400 scale-110"
-                                                    : "bg-gray-200"
-                                                    }`}
+                                                className={`absolute -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full ${
+                                                    isActive
+                                                        ? "bg-blue-400 scale-110"
+                                                        : "bg-gray-200"
+                                                }`}
                                                 style={{
-                                                    left:
-                                                        pos.x *
-                                                        compassSize,
-                                                    top:
-                                                        pos.y *
-                                                        compassSize,
+                                                    left: pos.x * compassSize,
+                                                    top: pos.y * compassSize,
                                                     width: buttonSize,
                                                     height: buttonSize,
                                                 }}
-                                                onPress={() => {
-                                                    onChange(dir);
-                                                    setIsOpen(false);
-                                                }}
+                                                onPress={() =>
+                                                    selectDirection(dir)
+                                                }
                                             >
                                                 <Icon
                                                     as={dirIcon}
@@ -191,10 +215,7 @@ export default function CloudDirInput({
 
                     <AlertDialogFooter className="flex-row justify-between">
                         <Pressable
-                            onPress={() => {
-                                onChange("");
-                                setIsOpen(false);
-                            }}
+                            onPress={clearDirection}
                             className="items-center justify-center rounded-full bg-gray-200 p-3"
                         >
                             <Icon as={BanIcon} />

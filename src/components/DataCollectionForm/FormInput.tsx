@@ -12,7 +12,7 @@ import { CloseIcon } from "@/components/ui/icon";
 import { Input, InputField, InputIcon, InputSlot } from "@/components/ui/input";
 import { ValidationResult } from "@/src/utils/validators";
 import { AlertCircleIcon } from "lucide-react-native";
-import React from "react";
+import React, { useCallback } from "react";
 
 interface FormInputProps {
     label: string;
@@ -23,7 +23,7 @@ interface FormInputProps {
     setErrFn: (message: string) => void;
 
     formatFn?: (value: string) => string;
-    validateFn?: (value: string) => ValidationResult | Promise<ValidationResult>
+    validateFn?: (value: string) => ValidationResult | Promise<ValidationResult>;
     autoComputeFn?: (value: string) => void;
 
     inputRef?: any;
@@ -41,6 +41,8 @@ interface FormInputProps {
 
     maxLength?: number;
     maxTypableChars?: number;
+
+    onFocus?: () => void;
 }
 
 export default function FormInput({
@@ -64,71 +66,72 @@ export default function FormInput({
     readonly = false,
     maxLength = 100,
     maxTypableChars,
+    onFocus,
 }: FormInputProps) {
+
     const showClear = !disabled && !readonly && value.length > 0;
 
-    const handleChangeText = (text: string) => {
-        // limit typing
-        if (maxTypableChars && text.length > maxTypableChars) {
-            return;
-        }
+    const handleFocus = useCallback(() => {
+        // Abort pending auto advance when user manually focuses
+        setPendingAdvance(null);
+        onFocus?.();
+    }, [onFocus, setPendingAdvance]);
 
-        setterFn(text)
+    const handleChangeText = useCallback(
+        (text: string) => {
+            // If maxTypableChars is set, prevent typing beyond it
+            if (maxTypableChars && text.replace(".", "").length > maxTypableChars) return;
 
-        const limit = maxTypableChars ?? maxLength;
+            setterFn(text);
 
-        if (limit && text.length >= limit) {
-            setPendingAdvance(fieldKey ?? null);
-        }
-    }
+            const limit = maxTypableChars ?? maxLength;
 
-    const handleBlur = async () => {
+            // Only trigger auto-advance for raw numeric input (no decimal yet)
+            const numericLength = text.replace(".", "").length;
+            if (limit && numericLength >= limit) {
+                setPendingAdvance(fieldKey ?? null);
+            }
+        },
+        [setterFn, maxTypableChars, maxLength, fieldKey, setPendingAdvance]
+    );
+
+    const handleBlur = useCallback(async () => {
         let newValue = value;
 
-        // 1. format
-        if (typeof formatFn === "function") {
+        // Format
+        if (formatFn) {
             newValue = formatFn(newValue);
             setterFn(newValue);
         }
 
-        // 2. validate (supports sync + async)
-        if (typeof validateFn === "function") {
+        // Validate
+        if (validateFn) {
             const { isValid, error: errMsg } = await validateFn(newValue);
-
             setErrFn(isValid ? "" : errMsg || "Invalid value");
-
-            // Optional: stop auto-compute if invalid
             if (!isValid) return;
         }
 
-        // 3. auto-compute (supports both sync and async)
-        if (typeof autoComputeFn === "function") {
+        // Auto compute
+        if (autoComputeFn) {
             try {
                 await autoComputeFn(newValue);
-
-                // mark that we should advance AFTER state update
                 setPendingAdvance(fieldKey ?? null);
             } catch (err) {
                 console.error("Auto-compute error:", err);
             }
         }
-    };
+    }, [value, formatFn, validateFn, autoComputeFn, setterFn, setErrFn, fieldKey]);
 
     return (
         <FormControl className="mt-2 flex flex-row items-center gap-2" isInvalid={!!error}>
-            {/* Label */}
             <FormControlLabel className="w-40">
-                <FormControlLabelText
-                    className="text-gray-700"
-                    size="sm"
-                >
+                <FormControlLabelText className="text-gray-700" size="sm">
                     {label}
                 </FormControlLabelText>
             </FormControlLabel>
 
-            {/* Input Wrapper (for positioning X) */}
             <Box className="flex-1">
-                <Box className="flex-1 flex flex-row gap-2">
+                <Box className="flex flex-row gap-2">
                     <Box className="flex-1">
                         <Input size="lg" isDisabled={checked || disabled} isReadOnly={readonly}>
                             <InputField
@@ -139,6 +142,7 @@ export default function FormInput({
                                 returnKeyType="next"
                                 submitBehavior="submit"
                                 onBlur={handleBlur}
+                                onFocus={handleFocus}
                                 inputMode={isAlphanumeric ? "text" : "numeric"}
                                 maxLength={maxLength}
                             />
@@ -155,13 +159,15 @@ export default function FormInput({
                         </Input>
                     </Box>
 
-                    {/* Optional Checkbox */}
                     {showCheckbox && (
                         <Button
                             size="lg"
                             variant="solid"
                             action="secondary"
-                            className={`px-4 border ${checked ? "bg-blue-400 border-blue-400" : "bg-white border-neutral-300"}`}
+                            className={`px-4 border ${checked
+                                ? "bg-blue-400 border-blue-400"
+                                : "bg-white border-neutral-300"
+                                }`}
                             isDisabled={disabled}
                             onPress={() => onCheckChange?.(!checked)}
                         >
@@ -174,7 +180,9 @@ export default function FormInput({
 
                 <FormControlError>
                     <FormControlErrorIcon as={AlertCircleIcon} size="xs" />
-                    <FormControlErrorText className="text-xs">{error}</FormControlErrorText>
+                    <FormControlErrorText className="text-xs">
+                        {error}
+                    </FormControlErrorText>
                 </FormControlError>
             </Box>
         </FormControl>

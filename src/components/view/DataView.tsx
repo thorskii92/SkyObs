@@ -26,6 +26,8 @@ export default function DataView({ observedData }) {
         return unit ? `${value} ${unit}` : `${value}`;
     }
 
+    const dStatus = observedData.isValidated === 0 ? "recorded" : "validated";
+
     return (
         <>
 
@@ -39,12 +41,10 @@ export default function DataView({ observedData }) {
             )}
 
             {/* Heading */}
-            <DataViewHeader observedData={observedData} status={"recorded"} />
+            <DataViewHeader observedData={observedData} status={dStatus} />
             <KeyboardAwareScrollView showsVerticalScrollIndicator={false} className="flex-1 bg-white">
                 {/* Visibility */}
                 <Box className="flex flex-row px-2 mb-2">
-                    <Box className="w-1 bg-blue-400" />
-
                     {/* Content */}
                     <Box className="flex-1 bg-white shadow-sm p-4">
                         {/* Header with icon */}
@@ -78,8 +78,6 @@ export default function DataView({ observedData }) {
                 {/* Wind */}
                 <Box className="flex flex-row px-2 mb-2">
                     {/* Left accent bar */}
-                    <Box className="w-1 bg-blue-400" />
-
                     {/* Content */}
                     <Box className="flex-1 bg-white shadow-sm p-4">
                         {/* Header with icon */}
@@ -108,8 +106,6 @@ export default function DataView({ observedData }) {
                 {/* Temperature */}
                 <Box className="flex flex-row px-2 mb-2">
                     {/* Left accent bar */}
-                    <Box className="w-1 bg-blue-400" />
-
                     {/* Content */}
                     <Box className="flex-1 bg-white shadow-sm p-4">
                         {/* Header with icon */}
@@ -163,8 +159,6 @@ export default function DataView({ observedData }) {
                 {/* Atmospheric Pressure */}
                 <Box className="flex flex-row px-2 mb-2">
                     {/* Left accent bar */}
-                    <Box className="w-1 bg-blue-400" />
-
                     {/* Content */}
                     <Box className="flex-1 bg-white shadow-sm p-4">
                         {/* Header with icon */}
@@ -213,8 +207,6 @@ export default function DataView({ observedData }) {
                 {/* Pressure Computation */}
                 <Box className="flex flex-row px-2 mb-2">
                     {/* Left accent bar */}
-                    <Box className="w-1 bg-blue-400" />
-
                     {/* Content */}
                     <Box className="flex-1 bg-white shadow-sm p-4">
                         {/* Header with icon */}
@@ -263,8 +255,6 @@ export default function DataView({ observedData }) {
                 {/* Atmospheric Phenomena */}
                 <Box className="flex flex-row px-2 mb-2">
                     {/* Left accent bar */}
-                    <Box className="w-1 bg-blue-400" />
-
                     {/* Content */}
                     <Box className="flex-1 bg-white shadow-sm p-4">
                         {/* Header with icon */}
@@ -303,8 +293,6 @@ export default function DataView({ observedData }) {
                 {/* Clouds */}
                 <Box className="flex flex-row px-2 mb-2">
                     {/* Left accent bar */}
-                    <Box className="w-1 bg-blue-400" />
-
                     {/* Content */}
                     <Box className="flex-1 bg-white shadow-sm p-4">
                         {/* Header with icon */}
@@ -422,8 +410,6 @@ export default function DataView({ observedData }) {
                 {/* Remarks */}
                 <Box className="flex flex-row px-2 mb-2">
                     {/* Left accent bar */}
-                    <Box className="w-1 bg-blue-400" />
-
                     {/* Content */}
                     <Box className="flex-1 bg-white shadow-sm p-4">
                         {/* Header with icon */}

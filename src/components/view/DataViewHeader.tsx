@@ -20,7 +20,7 @@ export default function DataViewHeader({ observedData, status }) {
             </Heading>
 
             {/* Date, Hour, and Observer Initial */}
-            <Box className="gap-2 flex-row items-center justify-center">
+            <Box className="gap-2 flex-row items-center justify-center flex-wrap">
                 <Badge size="lg" action="muted" className="gap-1">
                     <BadgeIcon as={CalendarDaysIcon} />
                     <BadgeText>{formattedDate}</BadgeText>

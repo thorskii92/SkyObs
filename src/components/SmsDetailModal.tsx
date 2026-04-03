@@ -12,7 +12,9 @@ interface SmsLog {
     uId: number;
     status: string;
     msg: string;
-    recip: string;
+    recip_num: string;
+    recip_name?: string;
+    category: string;
     dateSent: string;
     channel: string;
     stnName?: string;
@@ -62,58 +64,54 @@ export default function SmsDetailModal({ visible, sms, onClose }: SmsDetailModal
     return (
         <AlertDialog isOpen={visible} onClose={onClose}>
             <AlertDialogBackdrop />
-            <AlertDialogContent className="max-w-md">
+            <AlertDialogContent className="max-w-sm">
                 <AlertDialogHeader>
-                    <Heading size="md">SMS Details</Heading>
+                    <Heading size="sm">SMS Details</Heading>
                 </AlertDialogHeader>
 
                 <AlertDialogBody>
-                    <VStack space="md">
-                        <Box>
-                            <Text className="font-medium text-gray-600 mb-1">Status</Text>
-                            <Badge className={`px-2 py-1 rounded-full text-sm font-medium ${getStatusColor(sms.status)}`}>
-                                <BadgeText>{sms.status}</BadgeText>
+                    <VStack space="sm">
+
+                        {/* Status + Category */}
+                        <Box className="flex flex-row justify-between items-center">
+                            <Badge className={`px-2 py-1 rounded-full ${getStatusColor(sms.status)}`}>
+                                <BadgeText className="text-xs">
+                                    {sms.status}
+                                </BadgeText>
                             </Badge>
-                        </Box>
 
-                        <Box>
-                            <Text className="font-medium text-gray-600 mb-1">Date Sent</Text>
-                            <Text className="text-sm">{formatDateTime(sms.dateSent)}</Text>
-                        </Box>
-
-                        <Box>
-                            <Text className="font-medium text-gray-600 mb-1">Recipient</Text>
-                            <Text className="text-sm">{sms.recip}</Text>
-                        </Box>
-
-                        <Box>
-                            <Text className="font-medium text-gray-600 mb-1">Station</Text>
-                            <Text className="text-sm">
-                                {sms.stnName || sms.ICAO || `Station ${sms.stnId}`}
+                            <Text className="text-xs text-gray-600">
+                                {sms.category}
                             </Text>
                         </Box>
 
+                        {/* Date */}
+                        <Text className="text-xs text-gray-500">
+                            {formatDateTime(sms.dateSent)}
+                        </Text>
+
+                        {/* Recipient */}
                         <Box>
-                            <Text className="font-medium text-gray-600 mb-1">Channel</Text>
-                            <Text className="text-sm">{sms.channel}</Text>
+                            <Text className="text-sm font-medium">
+                                {sms.recip_name || "Unknown"}
+                            </Text>
+                            <Text className="text-xs text-gray-500 font-mono">
+                                {sms.recip_num}
+                            </Text>
                         </Box>
 
-                        <Box>
-                            <Text className="font-medium text-gray-600 mb-1">Message</Text>
-                            <Box className="bg-gray-50 p-3 rounded border">
-                                <Text className="text-sm whitespace-pre-wrap">{sms.msg}</Text>
-                            </Box>
+                        {/* Message */}
+                        <Box className="bg-gray-50 p-2 rounded border">
+                            <Text className="text-xs whitespace-pre-wrap">
+                                {sms.msg}
+                            </Text>
                         </Box>
 
-                        <Box>
-                            <Text className="font-medium text-gray-600 mb-1">Message Length</Text>
-                            <Text className="text-sm">{sms.msg.length} characters</Text>
-                        </Box>
                     </VStack>
                 </AlertDialogBody>
 
                 <AlertDialogFooter>
-                    <Button onPress={onClose} variant="outline">
+                    <Button onPress={onClose} size="sm" variant="outline">
                         <ButtonText>Close</ButtonText>
                     </Button>
                 </AlertDialogFooter>

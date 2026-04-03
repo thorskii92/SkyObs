@@ -34,10 +34,6 @@ export default function ViewDataScreen() {
                     setObservedData(results[0]); // assuming results is an array of observations
                 }
 
-                console.log("Station ID:", stationId);
-                console.log("Time:", time);
-                console.log("Date:", date);
-                console.log("Results:", results);
             } catch (error) {
                 console.error("Failed to fetch synop data:", error);
                 setEmpty(true);

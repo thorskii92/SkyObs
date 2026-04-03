@@ -1,124 +1,102 @@
 export const formatTemp = (value: string, reverse: boolean = false): string => {
-    try {
-        if (!value) return value;
+    if (!value) return value;
 
-        if (!reverse) {
-            // normal formatting: "253" -> 25.3
-            if (value.length === 3 && /^\d{3}$/.test(value)) {
-                return (Number(value) * 0.1).toFixed(1);
-            }
-            return value;
-        } else {
-            // reverse formatting: "25.3" -> "253"
-            const num = Number(value);
-            if (!isNaN(num)) {
-                return Math.round(num * 10)
-                    .toString()
-                    .padStart(3, "0");
-            }
-            return value;
+    if (!reverse) {
+        const num = Number(value);
+        if (!isNaN(num)) {
+            // If already decimal, normalize to 1 decimal
+            if (value.includes(".")) return num.toFixed(1);
+            // If 3-digit raw code, e.g., "253" -> 25.3
+            if (/^\d{3}$/.test(value)) return (num * 0.1).toFixed(1);
         }
-    } catch {
-        return value; // fail-safe
-    }
-};
-
-export const formatRH = (value: string, reverse: boolean = false): string => {
-    try {
-        if (!value) return value;
-
-        if (!reverse) {
-            // normal formatting: "45" -> 45.0
-            if (value.length === 2 && /^\d{2}$/.test(value)) {
-                return Number(value).toFixed(1);
-            }
-        } else {
-            // reverse formatting: "45.0" -> "45"
-            const num = Number(value);
-            if (!isNaN(num)) {
-                return Math.round(num).toString().padStart(2, "0");
-            }
-        }
-
         return value;
-    } catch {
+    } else {
+        const num = Number(value);
+        if (!isNaN(num)) return Math.round(num * 10).toString().padStart(3, "0");
         return value;
     }
 };
 
 export const formatPres = (value: string, reverse: boolean = false): string => {
-    try {
-        if (!value) return value;
+    if (!value) return value;
 
-        if (!reverse) {
-            // normal formatting: "234" -> pressure in hPa
-            if (value.length === 3 && /^\d{3}$/.test(value)) {
-                const num = Number(value);
+    if (!reverse) {
+        const num = Number(value);
+        if (!isNaN(num)) {
+            if (value.includes(".")) return num.toFixed(1);
 
-                if (num < 500) {
-                    return ((num + 10000) * 0.1).toFixed(1);
-                } else {
-                    return ((num + 9000) * 0.1).toFixed(1);
-                }
-            }
-        } else {
-            // reverse formatting: hPa -> SYNOP 3-digit code
-            const num = Number(value);
-            if (!isNaN(num)) {
-                const scaled = Math.round(num * 10);
-                if (scaled >= 10000) {
-                    return (scaled - 10000).toString().padStart(3, "0");
-                } else {
-                    return (scaled - 9000).toString().padStart(3, "0");
-                }
+            if (/^\d{3}$/.test(value)) {
+                const adjusted = num < 500 ? num + 10000 : num + 9000;
+                return (adjusted * 0.1).toFixed(1);
             }
         }
-
         return value;
-    } catch {
+    } else {
+        const num = Number(value);
+        if (!isNaN(num)) {
+            const scaled = Math.round(num * 10);
+            const code = scaled >= 10000 ? scaled - 10000 : scaled - 9000;
+            return code.toString().padStart(3, "0");
+        }
         return value;
     }
 };
 
-
 export const formatNet3hr = (value: string): string => {
-    // Ensure it's numeric
+    if (!value) return value;
+
     const num = Number(value);
-    if (isNaN(num)) return value; // fallback if not a number
+    if (isNaN(num)) return value;
 
-    // Convert to 'xx.x' format
-    const formatted = (num / 10).toFixed(1);
-    return formatted;
+    return value.includes(".") ? num.toFixed(1) : (num / 10).toFixed(1);
 };
-
 
 export const formatPres24 = (value: string): string => {
     if (!value) return "";
 
-    // Check for sign
-    const isNegative = value.startsWith("-");
-    const raw = isNegative ? value.slice(1) : value;
+    const num = Number(value);
+    if (isNaN(num)) return "";
 
-    if (raw.length < 3) {
-        // not enough digits to format
-        return value;
-    }
-
-    // Insert decimal before last digit
-    const formatted = raw.slice(0, raw.length - 1) + "." + raw.slice(-1);
-
-    return isNegative ? "-" + formatted : formatted;
+    return value.includes(".") ? num.toFixed(1) : (num / 10).toFixed(1);
 };
 
 export const formatVaporP = (value: string): string => {
     if (!value) return "";
 
-    // Ensure at least 4 digits
-    const padded = value.padStart(4, "0");
+    const num = Number(value);
+    if (isNaN(num)) return "";
 
-    const formatted = padded.slice(0, 2) + "." + padded.slice(2) + "0";
+    return value.includes(".") ? num.toFixed(2) : (num / 100).toFixed(2);
+};
 
-    return formatted;
+export const formatRH = (value: string, reverse: boolean = false): string => {
+    if (!value) return value;
+
+    if (!reverse) {
+        const num = Number(value);
+        if (!isNaN(num)) return num.toFixed(1);
+        return value;
+    } else {
+        const num = Number(value);
+        if (!isNaN(num)) return Math.round(num).toString().padStart(2, "0");
+        return value;
+    }
+};
+
+export const formatWind = (value: string, reverse: boolean = false): string => {
+    if (!value) return "";
+
+    const num = Number(value);
+
+    if (isNaN(num)) return value;
+
+    if (!reverse) {
+        // Normal formatting: just pad to 3 digits
+        return Math.round(num).toString().padStart(3, "0");
+    } else {
+        // Reverse formatting: e.g., "005" -> 5
+        return Math.round(num).toString();
+    }
 };
 
 // DATE FORMATTER
@@ -128,4 +106,13 @@ export const formatDate = (date: Date) => {
     const day = date.getDate().toString().padStart(2, '0');
 
     return `${year}-${month}-${day}`;
+};
+
+// ISO DATE FORMATTER (YYYY-MM-DDT00:00:00.000Z)
+export const formatDateUTC = (date: Date) => {
+    const year = date.getFullYear();
+    const month = (date.getMonth() + 1).toString().padStart(2, "0");
+    const day = date.getDate().toString().padStart(2, "0");
+
+    return `${year}-${month}-${day}T00:00:00.000Z`;
 };

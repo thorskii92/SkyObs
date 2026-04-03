@@ -21,12 +21,12 @@ import { Spinner } from "@/components/ui/spinner";
 import { Text } from "@/components/ui/text";
 import TimePicker from "@/src/components/DateTime/TimePicker";
 import GlobalLoading from "@/src/components/GlobalLoading";
+import { useUser } from "@/src/context/UserContext";
 import { Station } from "@/src/models/station";
 import { API_URL, getStations } from "@/src/utils/api";
 import { getDB, getLAerodromeData, getLStations } from "@/src/utils/db";
 import { DateTimePickerAndroid } from '@react-native-community/datetimepicker';
 import { router, useLocalSearchParams } from "expo-router";
-import { SQLiteDatabase } from "expo-sqlite";
 import { Airplay, AlertTriangle, ChevronDownIcon } from "lucide-react-native";
 import { useEffect, useState } from "react";
 
@@ -38,7 +38,7 @@ export default function DateTime() {
     const params = useLocalSearchParams<{ MorS: "METAR" | "SPECI" }>();
     const MorS = params.MorS ?? "METAR";
 
-
+    const { user } = useUser();
     const [isLoading, setIsLoading] = useState<boolean>(true);
     const [stations, setStations] = useState<Station[]>([]);
     const [station, setStation] = useState<Station | null>(null);
@@ -195,7 +195,8 @@ export default function DateTime() {
                 setStations(localStations);
 
                 const defaultStation =
-                    localStations.find((s) => s.Id === 1) || null;
+                    localStations.find((s) => s.Id === user?.station_id) ||
+                    null;
                 setStation(defaultStation);
 
                 let initialTime;
@@ -343,7 +344,14 @@ export default function DateTime() {
                             }}
                         >
                             <SelectTrigger className="flex justify-between" variant="outline" size="md">
-                                <SelectInput value={`${station?.ICAO} - ${station?.stnName}`} placeholder="Select station" />
+                                <SelectInput
+                                    value={
+                                        station
+                                            ? `${station.wmoID}${station.stationID} - ${station.stnName}`
+                                            : undefined
+                                    }
+                                    placeholder="Select station"
+                                />
                                 <SelectIcon className="absolute right-3" as={ChevronDownIcon} />
                             </SelectTrigger>
 
@@ -438,6 +446,3 @@ export default function DateTime() {
     );
 }
 
-function syncStationsToLocal(db: SQLiteDatabase, apiResults: any[]) {
-    throw new Error("Function not implemented.");
-}

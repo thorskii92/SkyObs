@@ -13,10 +13,26 @@ export default function MainLayout() {
                 }}
                 tabBar={(props) => <BottomNavigationBar {...props} />}
             >
-                <Tabs.Screen name="index" />
-                <Tabs.Screen name="sms-history" />
-                <Tabs.Screen name="manual" />
-                <Tabs.Screen name="settings" />
+                <Tabs.Screen
+                    name="index"
+                    options={{ title: "Home" }}
+                />
+
+                <Tabs.Screen
+                    name="sms-history"
+                    options={{ title: "SMS" }}
+                />
+
+                <Tabs.Screen
+                    name="manual"
+                    options={{ title: "Manual" }}
+                />
+
+                {/* ✅ FIXED: use folder name, not index */}
+                <Tabs.Screen
+                    name="settings"
+                    options={{ title: "Settings" }}
+                />
             </Tabs>
         </>
     );
