@@ -9,7 +9,8 @@
       "tailwind.config": [
         "./tailwind.config.js"
       ]
-    }
+    },
+    "resolveJsonModule": true
   },
   "include": [
     "**/*.ts",

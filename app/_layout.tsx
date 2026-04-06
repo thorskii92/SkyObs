@@ -1,40 +1,38 @@
-import { Stack } from "expo-router";
-
 import { GluestackUIProvider } from '@/components/ui/gluestack-ui-provider';
 import '@/global.css';
+import AppInitializer from '@/src/components/AppInitializer';
+import { OnlineStatusProvider } from '@/src/context/IsOnlineContext';
+import { UserProvider } from '@/src/context/UserContext';
+import { Stack } from 'expo-router';
+import { SQLiteProvider, useSQLiteContext } from 'expo-sqlite';
+import { StatusBar } from 'expo-status-bar';
+import { KeyboardProvider } from 'react-native-keyboard-controller';
+
+function AppProviders({ children }: { children: React.ReactNode }) {
+  const db = useSQLiteContext();
+
+  return (
+    <OnlineStatusProvider>
+      <UserProvider db={db}>
+        {children}
+      </UserProvider>
+    </OnlineStatusProvider>
+  );
+}
 
 export default function RootLayout() {
   return (
-    <GluestackUIProvider>
-      <Stack screenOptions={{ headerShown: true, headerStyle: { backgroundColor: '#f9fafb' }, headerTintColor: '#333' }}>
-        <Stack.Screen
-          name="index"
-          options={{
-            title: "Home"
-          }}
-        />
-        <Stack.Screen
-          name="datetime"
-          options={{
-            headerTitle: "New Observation",
-            headerBackButtonDisplayMode: "minimal"
-          }}
-        />
-        <Stack.Screen
-          name="data-collection1"
-          options={{
-            headerTitle: "Data Collection",
-            headerBackButtonDisplayMode: "minimal",
-          }}
-        />
-        <Stack.Screen
-          name="data-collection2"
-          options={{
-            headerTitle: "Data Collection",
-            headerBackButtonDisplayMode: "minimal",
-          }}
-        />
-      </Stack>
-    </GluestackUIProvider>
+    <SQLiteProvider databaseName="plotsdb">
+      <AppInitializer>
+        <KeyboardProvider>
+          <GluestackUIProvider>
+            <StatusBar translucent />
+            <AppProviders>
+              <Stack screenOptions={{ headerShown: false }} />
+            </AppProviders>
+          </GluestackUIProvider>
+        </KeyboardProvider>
+      </AppInitializer>
+    </SQLiteProvider>
   );
 }
