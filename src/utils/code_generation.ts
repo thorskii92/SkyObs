@@ -324,7 +324,7 @@ export async function getSunshineGroup(
         const val = Number(row[`s${i}`] ?? 0);
         totalSunshine += val
     }
-    
+
     totalSunshine = totalSunshine / 60
 
     const code = Math.round(totalSunshine * 10)
@@ -632,7 +632,7 @@ export default async function generateCodeFromTemplate(
                 MorS: category.cName,
                 ICAO: stationICAO,
                 sDate: latest.sDate
-                    ? String(new Date(latest.sDate).getUTCDate()).padStart(2, "0")
+                    ? new Date(latest.sDate).toISOString().split("T")[0].split("-")[2]
                     : "",
                 sHour: latest.sHour,
                 SurfaceWind: latest.SurfaceWind ?? "",

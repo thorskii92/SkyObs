@@ -226,3 +226,9 @@ export const validateClouds = (
 
     return { isValid: true, error: "" };
 };
+
+export const validateCeiling = (ceiling?: string) => {
+    if (ceiling === "UNL") return { isValid: true, error: "" };
+    
+    return isNumeric(ceiling, "Ceiling");
+}

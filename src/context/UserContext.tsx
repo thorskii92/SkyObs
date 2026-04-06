@@ -11,6 +11,7 @@ import { updateUserProfile } from '../utils/api';
 
 type User = {
     id?: number;
+    user_id?: number; // ✅ mapped from API's user_id
     username: string;
     fullName?: string;
     userType?: string;

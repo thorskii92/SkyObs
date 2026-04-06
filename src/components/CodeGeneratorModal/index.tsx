@@ -24,9 +24,10 @@ import { useUser } from "@/src/context/UserContext";
 import generateCodeFromTemplate from "@/src/utils/code_generation";
 import { checkSmsExists, getDB, insertLSmsLog } from "@/src/utils/db";
 import { getSimCards, sendSms } from "expo-android-sms-sender";
-import { Lock, Unlock, X } from "lucide-react-native";
+import * as Clipboard from 'expo-clipboard';
+import { Copy, Lock, Unlock, X } from "lucide-react-native";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PermissionsAndroid, ScrollView } from "react-native";
+import { Alert, PermissionsAndroid, ScrollView } from "react-native";
 import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 
 type SimCard = {
@@ -184,6 +185,16 @@ export default function CodeGeneratorModal({
             setEditMode(false);
         }
     }, [hasSentMessages, editMode]);
+
+    const copyToClipboard = async () => {
+        try {
+            console.log("Copying to clipboard:", generatedCode);
+            await Clipboard.setStringAsync(generatedCode);
+        } catch (error) {
+            console.error("Failed to copy to clipboard:", error);
+            Alert.alert("Error", "Failed to copy code");
+        }
+    };
 
     // Check for already sent messages
     useEffect(() => {
@@ -545,19 +556,33 @@ export default function CodeGeneratorModal({
                                 </FormControlError>
                             )}
 
-                            {!isSending && !hasSentMessages && (
-                                <Button
-                                    size="sm"
-                                    variant="outline"
-                                    action={editMode ? "primary" : "secondary"}
-                                    onPress={() => setEditMode((prev) => !prev)}
-                                    className="mt-2"
-                                >
-                                    <Icon as={editMode ? Unlock : Lock} className="mr-2" />
-                                    <ButtonText>
-                                        {editMode ? "Lock Message" : "Edit Message"}
-                                    </ButtonText>
-                                </Button>
+                            {!isSending && (
+                                <Box className="flex-row gap-2 mt-2">
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        action={editMode ? "primary" : "secondary"}
+                                        onPress={() => setEditMode((prev) => !prev)}
+                                        className="flex-1"
+                                    >
+                                        <Icon as={editMode ? Unlock : Lock} className="mr-2" />
+                                        <ButtonText>
+                                            {editMode ? "Lock Message" : "Edit Message"}
+                                        </ButtonText>
+                                    </Button>
+
+                                    <Button
+                                        size="sm"
+                                        variant="outline"
+                                        action={isPlaceholder ? "secondary" : "primary"}
+                                        onPress={copyToClipboard}
+                                        className="flex-1"
+                                        disabled={isPlaceholder}
+                                    >
+                                        <Icon as={Copy} className="mr-2" />
+                                        <ButtonText>Copy</ButtonText>
+                                    </Button>
+                                </Box>
                             )}
                         </FormControl>
                     </AlertDialogBody>

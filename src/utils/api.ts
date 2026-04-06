@@ -176,18 +176,26 @@ export const getAllSynopData = async (): Promise<any[] | null> => {
 
 export const saveSynopData = async (synopData: SynopData) => {
     try {
+        // Normalize dates for MySQL
+        const payload = {
+            ...synopData,
+            sDate: synopData.sDate,           // "YYYY-MM-DD"
+            sActualDateTime: synopData.sActualDateTime,
+            summaryDate: synopData.summaryDate
+        };
+
         const response = await fetch(`${API_URL}/api/synop_data`, {
-            method: "POST",
+            method: "POST", // can switch to PUT if you implement update logic
             headers: {
                 "Content-Type": "application/json",
             },
-            body: JSON.stringify(synopData),
+            body: JSON.stringify(payload),
         });
 
         const data = await response.json();
 
         if (!response.ok) {
-            throw new Error(data.error || data.message || "Failed to update SYNOP data");
+            throw new Error(data.error || data.message || "Failed to save SYNOP data");
         }
 
         return data;
@@ -197,20 +205,95 @@ export const saveSynopData = async (synopData: SynopData) => {
     }
 };
 
+export const saveAerodromeData = async (aerodromeData: any) => {
+    try {
+        const response = await fetch(`${API_URL}/api/aerodrome`, {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+            body: JSON.stringify(aerodromeData),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            if (response.status === 409) {
+                // Already exists
+                console.log("Aerodrome record already exists in API");
+                return { success: true, message: "Already exists" };
+            }
+            throw new Error(data.error || "Failed to save aerodrome data");
+        }
+
+        return data;
+    } catch (error) {
+        console.error("saveAerodromeData error:", error);
+        return null;
+    }
+};
+
+export const getAerodromeData = async (params: {
+    startDate?: string;
+    endDate?: string;
+    stnId?: string | number;
+    page?: number;
+    limit?: number;
+} = {}) => {
+    const {
+        startDate,
+        endDate,
+        stnId,
+        page = 1,
+        limit = 500,
+    } = params;
+
+    const query = new URLSearchParams();
+
+    if (startDate) query.append('startDate', startDate);
+    if (endDate) query.append('endDate', endDate);
+    if (stnId) query.append('stnId', stnId.toString());
+
+    query.append('page', page.toString());
+    query.append('limit', limit.toString());
+
+    const url = `${API_URL}/api/aerodrome?${query.toString()}`;
+
+    try {
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (!res.ok) {
+            throw new Error(data.error || "Failed to fetch aerodrome data");
+        }
+
+        return {
+            results: data.results || [],
+            pagination: data.pagination || null,
+        };
+    } catch (error) {
+        console.error("Error fetching aerodrome data:", error);
+        return { results: [], pagination: null };
+    }
+};
+
 export const getPsychrometric = async (
-    dBulb: string,
-    wBulb: string
+    dBulb?: string,
+    wBulb?: string
 ) => {
     try {
         const controller = new AbortController();
-        const timeout = setTimeout(() => {
-            controller.abort();
-        }, 10000); // 10 second timeout
+        const timeout = setTimeout(() => controller.abort(), 10000); // 10s timeout
 
-        const response = await fetch(
-            `${API_URL}/api/psychrometric?dBulb=${encodeURIComponent(dBulb)}&wBulb=${encodeURIComponent(wBulb)}`,
-            { signal: controller.signal }
-        );
+        // Build query string dynamically
+        const params = new URLSearchParams();
+        if (dBulb !== undefined) params.append("dBulb", dBulb);
+        if (wBulb !== undefined) params.append("wBulb", wBulb);
+
+        const queryString = params.toString();
+        const url = `${API_URL}/api/psychrometric${queryString ? `?${queryString}` : ""}`;
+
+        const response = await fetch(url, { signal: controller.signal });
 
         clearTimeout(timeout);
 
@@ -232,7 +315,7 @@ export const getPsychrometric = async (
             console.warn("Network/API error:", error.message);
         }
 
-        return null; // Let fallback handle it
+        return null; // fallback
     }
 };
 
@@ -453,6 +536,239 @@ export const deleteSmsRecipientAPI = async (payload: {
         return data;
     } catch (error) {
         console.error("deleteSmsRecipientAPI error:", error);
+        return null;
+    }
+};
+
+// =====================================================
+// CATEGORY API
+// =====================================================
+
+export const getCategories = async () => {
+    try {
+        const response = await fetch(`${API_URL}/api/category`);
+        if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+        const json = await response.json();
+        return json.results || [];
+    } catch (error) {
+        console.error("getCategories error:", error);
+        return null;
+    }
+};
+
+// =====================================================
+// CODE TEMPLATE API
+// =====================================================
+
+export const getCodeTemplates = async (params: {
+    stnId?: number | string;
+    cID?: number | string;
+    page?: number;
+    limit?: number;
+} = {}) => {
+    const {
+        stnId,
+        cID,
+        page = 1,
+        limit = 500,
+    } = params;
+
+    const query = new URLSearchParams();
+    if (stnId) query.append('stnId', stnId.toString());
+    if (cID) query.append('cID', cID.toString());
+    query.append('page', page.toString());
+    query.append('limit', limit.toString());
+
+    const url = `${API_URL}/api/codetemplate?${query.toString()}`;
+
+    try {
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error || "Failed to fetch code templates");
+
+        return {
+            results: data.results || [],
+            pagination: data.pagination || null,
+        };
+    } catch (error) {
+        console.error("getCodeTemplates error:", error);
+        return { results: [], pagination: null };
+    }
+};
+
+export const saveCodeTemplate = async (template: any) => {
+    try {
+        const payload = { ...template };
+
+        // Ensure MySQL/SQLite datetime format
+        if (payload.dateadded && typeof payload.dateadded === 'string') {
+            payload.dateadded = payload.dateadded.replace('T', ' ').split('.')[0];
+        }
+        if (payload.dateupdated && typeof payload.dateupdated === 'string') {
+            payload.dateupdated = payload.dateupdated.replace('T', ' ').split('.')[0];
+        }
+
+        // Always use PUT now since we are updating/creating by unique fields
+        const url = `${API_URL}/api/codetemplate`;
+
+        const response = await fetch(url, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || "Failed to save code template");
+        }
+
+        return data;
+    } catch (error) {
+        console.error("saveCodeTemplate error:", error);
+        return null;
+    }
+};
+
+export const deleteCodeTemplate = async (stnID: number, tType: string, hour?: string | null) => {
+    try {
+        const payload = {
+            stnID,
+            tType,
+            hour: hour || null
+        };
+
+        const response = await fetch(`${API_URL}/api/codetemplate`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+
+        if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.error || "Failed to delete code template");
+        }
+
+        return { success: true };
+    } catch (error) {
+        console.error("deleteCodeTemplate error:", error);
+        return null;
+    }
+};
+// =====================================================
+// CODE PARAMETER API
+// =====================================================
+
+export const getCodeParameters = async (params: {
+    stnId?: number | string;
+    cID?: number | string;
+    page?: number;
+    limit?: number;
+} = {}) => {
+    const {
+        stnId,
+        cID,
+        page = 1,
+        limit = 500,
+    } = params;
+
+    const query = new URLSearchParams();
+    if (stnId) query.append('stnId', stnId.toString());
+    if (cID) query.append('cID', cID.toString());
+    query.append('page', page.toString());
+    query.append('limit', limit.toString());
+
+    const url = `${API_URL}/api/codeparameter?${query.toString()}`;
+
+    try {
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error || "Failed to fetch code parameters");
+
+        return {
+            results: data.results || [],
+            pagination: data.pagination || null,
+        };
+    } catch (error) {
+        console.error("getCodeParameters error:", error);
+        return { results: [], pagination: null };
+    }
+};
+
+export const saveCodeParameter = async (parameter: any) => {
+    try {
+        // Convert ISO datetime to MySQL format (YYYY-MM-DD HH:MM:SS)
+        const payload = { ...parameter };
+        if (payload.dateadded && typeof payload.dateadded === 'string') {
+            payload.dateadded = payload.dateadded.replace('T', ' ').split('.')[0];
+        }
+        if (payload.dateupdated && typeof payload.dateupdated === 'string') {
+            payload.dateupdated = payload.dateupdated.replace('T', ' ').split('.')[0];
+        }
+
+        const response = await fetch(`${API_URL}/api/codeparameter`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        });
+
+        const data = await response.json();
+        if (!response.ok) {
+            if (response.status === 409) {
+                console.log("Code parameter already exists in API");
+                return { success: true, message: "Already exists" };
+            }
+            throw new Error(data.error || "Failed to save code parameter");
+        }
+
+        return data;
+    } catch (error) {
+        console.error("saveCodeParameter error:", error);
+        return null;
+    }
+};
+
+// =====================================================
+// PSYCHROMETRIC LOOKUP DATA API
+// =====================================================
+
+export const getPsychrometricData = async () => {
+
+    const url = `${API_URL}/api/psychrometric`;
+
+    try {
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error || "Failed to fetch psychrometric data");
+
+        return {
+            results: data.results || [],
+            pagination: data.pagination || null,
+        };
+    } catch (error) {
+        console.error("getPsychrometricData error:", error);
+        return { results: [], pagination: null };
+    }
+};
+
+export const savePsychrometricData = async (psychData: any) => {
+    try {
+        const response = await fetch(`${API_URL}/api/psychrometric`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(psychData),
+        });
+
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "Failed to save psychrometric data");
+
+        return data;
+    } catch (error) {
+        console.error("savePsychrometricData error:", error);
         return null;
     }
 };

@@ -14,7 +14,7 @@ import { getPsychrometric } from "@/src/utils/api";
 import { computeObservedPeriod, getDB, getLPsychrometric, getLSynopData, withTransaction } from "@/src/utils/db";
 import { formatNet3hr, formatPres, formatPres24, formatTemp, formatVaporP, formatWind } from "@/src/utils/formatters";
 import { get24HoursAgo, get3HoursAgo } from "@/src/utils/time";
-import { isTendencyValid, validateField, validateMaxTemp, validateMinTemp } from "@/src/utils/validators";
+import { isTendencyValid, validateCeiling, validateField, validateMaxTemp, validateMinTemp } from "@/src/utils/validators";
 
 import { Icon } from "@/components/ui/icon";
 import { CircleGaugeIcon, CloseIcon, CloudRainWindIcon, CloudyIcon, FileText, ThermometerIcon, ViewIcon, WindIcon } from "lucide-react-native";
@@ -27,12 +27,14 @@ import FormInput from "./FormInput";
 import FormTextarea from "./FormTextarea";
 import ObservationHeader from "./ObservationHeader";
 // import { checkApiConnection, saveSynopData, API_URL } from "../api"; // adjust path if needed
+import { useUser } from "@/src/context/UserContext";
 import { API_URL, checkApiConnection, saveSynopData } from "@/src/utils/api";
 
 const TRACE = "0.01";
 
 export default function DataCollectionForm({ dataParams, formData, setField, errors, setError }) {
     const toast = useToast();
+    const { user } = useUser();
 
     const handleSaveObservation = async (
         mode: "save" | "update" | "qc"
@@ -107,6 +109,7 @@ export default function DataCollectionForm({ dataParams, formData, setField, err
             // FULL RECORD
             // =========================
             const record: any = {
+                uID: user?.id ?? null,
                 stnID: dataParams.stationId,
                 sDate: dataParams.date,
                 sHour: dataParams.time,
@@ -175,7 +178,7 @@ export default function DataCollectionForm({ dataParams, formData, setField, err
                 typeFourthLayer: formData.clouds.fourthLayer.type || null,
                 heightFourthLayer: formData.clouds.fourthLayer.height || null,
 
-                ceiling: formData.clouds.ceiling || null,
+                ceiling: formData.clouds.ceiling === "UNL" ? "9999" : Number(formData.clouds.ceiling) * 10 || null,
                 dirLow: formData.clouds.dirLow || null,
                 dirMid: formData.clouds.dirMid || null,
                 dirHigh: formData.clouds.dirHigh || null,
@@ -883,7 +886,7 @@ export default function DataCollectionForm({ dataParams, formData, setField, err
 
                             setPendingAdvance={setPendingAdvance}
                         />
-                        <FormInput label="Ceiling" value={formData.clouds.ceiling} maxLength={3} setterFn={(v: string) => setField(["clouds", "ceiling"], v)} error={errors.clouds.ceiling} setErrFn={(m: string) => setError(["clouds", "ceiling"], m)} validateFn={(v: string) => { return validateField(v, "Ceiling", { numeric: false }) }} fieldKey="clouds.ceiling" inputRef={(ref: any) => registerRef("clouds.ceiling", ref)} setPendingAdvance={setPendingAdvance} isAlphanumeric />
+                        <FormInput label="Ceiling" value={formData.clouds.ceiling} maxLength={3} setterFn={(v: string) => setField(["clouds", "ceiling"], v)} error={errors.clouds.ceiling} setErrFn={(m: string) => setError(["clouds", "ceiling"], m)} validateFn={(v: string) => { return validateField(v, "Ceiling", { customFn: (val) => validateCeiling(val) }) }} fieldKey="clouds.ceiling" inputRef={(ref: any) => registerRef("clouds.ceiling", ref)} setPendingAdvance={setPendingAdvance} isAlphanumeric />
                         <CloudDirInput
                             label="Direction of Low Clouds"
                             value={formData.clouds.dirLow}

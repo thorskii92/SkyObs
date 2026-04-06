@@ -25,6 +25,10 @@ export default function SettingsScreen() {
             route: "/settings/code-templates",
         },
         {
+            label: "Export All Data",
+            route: "/settings/export",
+        },
+        {
             label: "Data Synchronization",
             route: "/settings/sync",
         },
@@ -111,8 +115,8 @@ export default function SettingsScreen() {
                         <Pressable
                             key={item.label}
                             onPress={() => {
-                                // 🔒 Optional: protect routes
-                                if (!user) {
+                                // Export data should be available without signing in.
+                                if (!user && item.route !== "/settings/export") {
                                     router.push("/login");
                                     return;
                                 }

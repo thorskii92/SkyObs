@@ -1,6 +1,7 @@
+import { Directory, File, Paths } from 'expo-file-system';
 import * as SQLite from "expo-sqlite";
 import { Station } from "../models/station";
-import { API_URL, getStations, getSynopData } from "./api";
+import { API_URL, getAerodromeData, getSmsRecipientsAPI, getStations, getSynopData } from "./api";
 
 export const DB_NAME = "plotsdb"
 
@@ -468,11 +469,8 @@ export const createTAerodrome = async (db: SQLite.SQLiteDatabase) => {
                 date_created TEXT DEFAULT (datetime('now')),
                 date_updated TEXT,
 
-                UNIQUE(stnID, MorS, sDate, sHour),
+                UNIQUE(stnID, MorS, sDate, sHour)
 
-                FOREIGN KEY (stnID) REFERENCES stations(Id),
-                FOREIGN KEY (uID) REFERENCES users(Id)
-                -- Removed MorS foreign key reference since it's now TEXT
             );
         `);
 
@@ -485,8 +483,6 @@ export const createTAerodrome = async (db: SQLite.SQLiteDatabase) => {
             CREATE INDEX IF NOT EXISTS idx_aerodrome_datetime
             ON aerodrome (sDate, sHour);
         `);
-
-        await db.execAsync(`PRAGMA foreign_keys = ON;`);
 
         console.log("aerodrome table created successfully.");
     } catch (error) {
@@ -519,26 +515,99 @@ export const getLStations = async (
     }
 };
 
+// Upsert stations data
+export const upsertStations = async (
+    db: SQLite.SQLiteDatabase,
+    stations: any[]
+) => {
+    try {
+        for (const station of stations) {
+            await db.runAsync(`
+                INSERT INTO stations (
+                    wmoID, stationID, ICAO, stnName, Latitude, Longitude, height, mslCor, altCor,
+                    Synoptic, UpperAir, Aeromet, Agromet, Hydromet, Radar, isRegionOffice,
+                    PRSD, LatDef, LonDef, Station, Town, Province, ElevationFt
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(stationID) DO UPDATE SET
+                    wmoID = excluded.wmoID,
+                    ICAO = excluded.ICAO,
+                    stnName = excluded.stnName,
+                    Latitude = excluded.Latitude,
+                    Longitude = excluded.Longitude,
+                    height = excluded.height,
+                    mslCor = excluded.mslCor,
+                    altCor = excluded.altCor,
+                    Synoptic = excluded.Synoptic,
+                    UpperAir = excluded.UpperAir,
+                    Aeromet = excluded.Aeromet,
+                    Agromet = excluded.Agromet,
+                    Hydromet = excluded.Hydromet,
+                    Radar = excluded.Radar,
+                    isRegionOffice = excluded.isRegionOffice,
+                    PRSD = excluded.PRSD,
+                    LatDef = excluded.LatDef,
+                    LonDef = excluded.LonDef,
+                    Station = excluded.Station,
+                    Town = excluded.Town,
+                    Province = excluded.Province,
+                    ElevationFt = excluded.ElevationFt
+            `, [
+                station.wmoID,
+                station.stationID,
+                station.ICAO,
+                station.stnName,
+                station.Latitude,
+                station.Longitude,
+                station.height,
+                station.mslCor,
+                station.altCor,
+                station.Synoptic,
+                station.UpperAir,
+                station.Aeromet,
+                station.Agromet,
+                station.Hydromet,
+                station.Radar,
+                station.isRegionOffice,
+                station.PRSD,
+                station.LatDef,
+                station.LonDef,
+                station.Station,
+                station.Town,
+                station.Province,
+                station.ElevationFt
+            ]);
+        }
+        console.log(`Upserted ${stations.length} stations`);
+    } catch (error) {
+        console.error("Error upserting stations:", error);
+    }
+};
+
 // Synoptic Data
 export const getLSynopData = async (
     db: SQLite.SQLiteDatabase,
-    stnID: string | number,
+    stnID?: string | number,
     sHour?: string,
     sDate?: string,
     sortBy: string = "sHour",       // default sort column
     sortOrder: "ASC" | "DESC" = "DESC" // default sort order
 ) => {
     try {
-        let query = `SELECT * FROM synop_data WHERE stnID = ?`;
-        const params: (string | number)[] = [stnID];
+        let query = `SELECT * FROM synop_data`;
+        const params: (string | number)[] = [];
+
+        if (stnID !== undefined) {
+            query += ` WHERE stnID = ?`;
+            params.push(stnID);
+        }
 
         if (sHour) {
-            query += ` AND sHour = ?`;
+            query += params.length ? ` AND sHour = ?` : ` WHERE sHour = ?`;
             params.push(sHour);
         }
 
         if (sDate) {
-            query += ` AND sDate LIKE ? || '%'`;
+            query += params.length ? ` AND sDate LIKE ? || '%'` : ` WHERE sDate LIKE ? || '%'`;
             params.push(sDate);
         }
 
@@ -548,7 +617,7 @@ export const getLSynopData = async (
 
         query += ` ORDER BY ${sortBy} ${sortOrder}`;
 
-        console.log(query)
+        console.log(query);
         const synopData = await db.getAllAsync(query, params);
         return synopData;
     } catch (error) {
@@ -693,30 +762,35 @@ export const upsertSynopData = async (
 // Observed Data (joining stations with synop_data and aerodrome + category ID)
 export const getLObservedData = async (
     db: SQLite.SQLiteDatabase,
-    stnID: string | number,
+    stnID?: string | number,
     sHour?: string,
     sDate?: string,
     sortBy: string = "sHour",
     sortOrder: "ASC" | "DESC" = "DESC"
 ) => {
     try {
-        return await withTransaction(db, async (tx) => {
-            const conditions: string[] = ["sd.stnID = ?"];
-            const params: (string | number)[] = [stnID];
 
-            if (sHour) {
-                conditions.push("sd.sHour = ?");
-                params.push(sHour);
-            }
-            if (sDate) {
-                conditions.push("sd.sDate LIKE ? || '%'");
-                params.push(sDate);
-            }
+        const conditions: string[] = [];
+        const params: (string | number)[] = [];
 
-            const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+        if (stnID !== undefined) {
+            conditions.push("sd.stnID = ?");
+            params.push(stnID);
+        }
 
-            // Fetch SYNOP data with category ID
-            const synopQuery = `
+        if (sHour) {
+            conditions.push("sd.sHour = ?");
+            params.push(sHour);
+        }
+        if (sDate) {
+            conditions.push("sd.sDate LIKE ? || '%'");
+            params.push(sDate);
+        }
+
+        const whereClause = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
+        // Fetch SYNOP data with category ID
+        const synopQuery = `
                 SELECT sd.*, c.cID, 'SYNOP' AS category,
                        s.ICAO, s.wmoID, s.stationID, s.stnName, s.mslCor, s.altCor
                 FROM synop_data sd
@@ -724,24 +798,29 @@ export const getLObservedData = async (
                 LEFT JOIN category c ON c.stnID = sd.stnID AND c.cName = 'SYNOP'
                 ${whereClause}
             `;
-            const synopRows = await tx.getAllAsync(synopQuery, params);
+        const synopRows = await db.getAllAsync(synopQuery, params);
 
-            // Fetch Aerodrome data (METAR/SPECI) with category ID
-            const aeroConditions: string[] = ["a.stnID = ?"];
-            const aeroParams: (string | number)[] = [stnID];
+        // Fetch Aerodrome data (METAR/SPECI) with category ID
+        const aeroConditions: string[] = [];
+        const aeroParams: (string | number)[] = [];
 
-            if (sHour) {
-                aeroConditions.push("a.sHour = ?");
-                aeroParams.push(sHour);
-            }
-            if (sDate) {
-                aeroConditions.push("a.sDate LIKE ? || '%'");
-                aeroParams.push(sDate);
-            }
+        if (stnID !== undefined) {
+            aeroConditions.push("a.stnID = ?");
+            aeroParams.push(stnID);
+        }
 
-            const aeroWhere = aeroConditions.length ? `WHERE ${aeroConditions.join(" AND ")}` : "";
+        if (sHour) {
+            aeroConditions.push("a.sHour = ?");
+            aeroParams.push(sHour);
+        }
+        if (sDate) {
+            aeroConditions.push("a.sDate LIKE ? || '%'");
+            aeroParams.push(sDate);
+        }
 
-            const aeroQuery = `
+        const aeroWhere = aeroConditions.length ? `WHERE ${aeroConditions.join(" AND ")}` : "";
+
+        const aeroQuery = `
                 SELECT a.*, c.cID, a.MorS AS category,
                        s.ICAO, s.wmoID, s.stationID, s.stnName, s.mslCor, s.altCor
                 FROM aerodrome a
@@ -750,43 +829,63 @@ export const getLObservedData = async (
                 ${aeroWhere}
                 AND a.MorS IN ('METAR', 'SPECI')
             `;
-            const aeroRows = await tx.getAllAsync(aeroQuery, aeroParams);
+        const aeroRows = await db.getAllAsync(aeroQuery, aeroParams);
 
-            // Merge rows by sDate + sHour
-            const merged: Record<string, any> = {};
+        // Merge rows by sDate + sHour
+        const merged: Record<string, any> = {};
 
-            const addRow = (row: any) => {
-                const key = `${row.sDate}_${row.sHour}`;
-                if (!merged[key]) {
-                    merged[key] = { ...row, category: row.category, cID: row.cID };
-                } else {
-                    // Merge fields: keep existing, overwrite null/empty, combine categories
-                    Object.keys(row).forEach((k) => {
-                        if (row[k] !== null && row[k] !== "" && (merged[key][k] === null || merged[key][k] === "")) {
-                            merged[key][k] = row[k];
-                        }
-                    });
-                    // Merge category and cID
-                    const categories = new Set(merged[key].category.split(","));
-                    categories.add(row.category);
-                    merged[key].category = Array.from(categories).join(",");
+        const normalizeDate = (date: any) => {
+            if (!date) return null;
+            if (typeof date === "string" && date.includes("T")) {
+                return date.split("T")[0];
+            }
+            return date;
+        };
 
-                    const cIDs = new Set([merged[key].cID, row.cID].filter(Boolean));
-                    merged[key].cID = Array.from(cIDs).join(",");
-                }
-            };
+        const addRow = (row: any) => {
+            const normalizedDate = normalizeDate(row.sDate);
+            const key = `${normalizedDate}_${row.sHour}`;
 
-            synopRows.forEach(addRow);
-            aeroRows.forEach(addRow);
+            if (!merged[key]) {
+                merged[key] = {
+                    ...row,
+                    sDate: normalizedDate,
+                    category: row.category,
+                    cID: row.cID
+                };
+            } else {
+                Object.keys(row).forEach((k) => {
+                    if (
+                        row[k] !== null &&
+                        row[k] !== "" &&
+                        (merged[key][k] === null || merged[key][k] === "")
+                    ) {
+                        merged[key][k] = row[k];
+                    }
+                });
 
-            // Convert merged object to array and sort
-            const result = Object.values(merged).sort((a, b) => {
-                if (sortOrder === "ASC") return a[sortBy] > b[sortBy] ? 1 : -1;
-                return a[sortBy] < b[sortBy] ? 1 : -1;
-            });
+                // Merge categories
+                const categories = new Set((merged[key].category || "").split(","));
+                categories.add(row.category);
+                merged[key].category = Array.from(categories).join(",");
 
-            return result;
+                // Merge cIDs
+                const cIDs = new Set(
+                    [merged[key].cID, row.cID].filter(Boolean)
+                );
+                merged[key].cID = Array.from(cIDs).join(",");
+            }
+        };
+        synopRows.forEach(addRow);
+        aeroRows.forEach(addRow);
+
+        // Convert merged object to array and sort
+        const result = Object.values(merged).sort((a, b) => {
+            if (sortOrder === "ASC") return a[sortBy] > b[sortBy] ? 1 : -1;
+            return a[sortBy] < b[sortBy] ? 1 : -1;
         });
+
+        return result;
     } catch (error) {
         console.error("Error fetching observed data:", error);
         return [];
@@ -796,7 +895,7 @@ export const getLObservedData = async (
 // Aerodrome Data
 export const getLAerodromeData = async (
     db: SQLite.SQLiteDatabase,
-    stnID: string | number,
+    stnID?: string | number,
     MorS?: string,                 // optional: "METAR" / "SPECI"
     sHour?: string,
     sDate?: string,
@@ -804,21 +903,26 @@ export const getLAerodromeData = async (
     sortOrder: "ASC" | "DESC" = "DESC" // default sort order
 ) => {
     try {
-        let query = `SELECT * FROM aerodrome WHERE stnID = ?`;
-        const params: (string | number)[] = [stnID];
+        let query = `SELECT * FROM aerodrome`;
+        const params: (string | number)[] = [];
+
+        if (stnID !== undefined) {
+            query += ` WHERE stnID = ?`;
+            params.push(stnID);
+        }
 
         if (MorS !== undefined) {
-            query += ` AND MorS = ?`;
+            query += stnID !== undefined ? ` AND MorS = ?` : ` WHERE MorS = ?`;
             params.push(MorS);
         }
 
         if (sHour) {
-            query += ` AND sHour = ?`;
+            query += (stnID !== undefined || MorS !== undefined) ? ` AND sHour = ?` : ` WHERE sHour = ?`;
             params.push(sHour);
         }
 
         if (sDate) {
-            query += ` AND sDate = ?`;
+            query += (stnID !== undefined || MorS !== undefined || sHour) ? ` AND sDate = ?` : ` WHERE sDate = ?`;
             params.push(sDate);
         }
 
@@ -892,9 +996,110 @@ export const upsertLPsychrometric = async (db: SQLite.SQLiteDatabase, params: an
 };
 
 
-// Code Template
-export type CodeTemplate = {
-    Template: string;
+// Code Template CRUD Operations
+export const createCodeTemplate = async (
+    db: SQLite.SQLiteDatabase,
+    template: {
+        stnID: number;
+        cID: number;
+        hour?: string;
+        uID?: number;
+        Template: string;
+        tType: 'General' | 'Specific';
+    }
+) => {
+    try {
+        const result = await db.runAsync(
+            `INSERT INTO codetemplate (stnID, cID, hour, uID, Template, tType, dateadded, dateupdated)
+             VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+            [template.stnID, template.cID, template.hour || null, template.uID || null, template.Template, template.tType]
+        );
+        return result.lastInsertRowId;
+    } catch (error) {
+        console.error("Error creating code template:", error);
+        throw error;
+    }
+};
+
+export const updateCodeTemplate = async (
+    db: SQLite.SQLiteDatabase,
+    codeID: number,
+    updates: {
+        Template?: string;
+        tType?: 'General' | 'Specific';
+        hour?: string;
+    }
+) => {
+    try {
+        const setParts: string[] = [];
+        const values: any[] = [];
+
+        if (updates.Template !== undefined) {
+            setParts.push("Template = ?");
+            values.push(updates.Template);
+        }
+        if (updates.tType !== undefined) {
+            setParts.push("tType = ?");
+            values.push(updates.tType);
+        }
+        if (updates.hour !== undefined) {
+            setParts.push("hour = ?");
+            values.push(updates.hour);
+        }
+
+        setParts.push("dateupdated = datetime('now')");
+
+        const sql = `UPDATE codetemplate SET ${setParts.join(", ")} WHERE codeID = ?`;
+        values.push(codeID);
+
+        await db.runAsync(sql, values);
+    } catch (error) {
+        console.error("Error updating code template:", error);
+        throw error;
+    }
+};
+
+export const deleteCodeTemplate = async (
+    db: SQLite.SQLiteDatabase,
+    codeID: number
+) => {
+    try {
+        await db.runAsync(
+            `DELETE FROM codetemplate WHERE codeID = ?`,
+            [codeID]
+        );
+    } catch (error) {
+        console.error("Error deleting code template:", error);
+        throw error;
+    }
+};
+
+export const getAllCodeTemplates = async (
+    db: SQLite.SQLiteDatabase,
+    stnID?: number
+): Promise<CodeTemplate[]> => {
+    try {
+        let query = `
+            SELECT ct.*, c.cName, s.stnName
+            FROM codetemplate ct
+            LEFT JOIN category c ON ct.cID = c.cID
+            LEFT JOIN stations s ON ct.stnID = s.Id
+        `;
+        const params: any[] = [];
+
+        if (stnID !== undefined) {
+            query += " WHERE ct.stnID = ?";
+            params.push(stnID);
+        }
+
+        query += " ORDER BY ct.dateadded DESC";
+
+        const templates = await db.getAllAsync<CodeTemplate>(query, params);
+        return templates as CodeTemplate[];
+    } catch (error) {
+        console.error("Error fetching all code templates:", error);
+        return [];
+    }
 };
 
 export const getLCodeTemplate = async (
@@ -944,13 +1149,13 @@ export const getLCodeTemplate = async (
 export type CodeParameter = {
     par: string;
     var: string;
-    varName: string;
+    varname: string;
 };
 
 export const getLCodeParams = async (db: SQLite.SQLiteDatabase, stnID: string, cID: number): Promise<CodeParameter[] | null> => {
     try {
         const codeParameters = await db.getAllAsync<CodeParameter>(
-            `SELECT par, var, varName FROM codeparameter
+            `SELECT par, var, varname FROM codeparameter
             WHERE stnID = ? AND cID = ?`,
             [stnID, cID]
         );
@@ -963,6 +1168,32 @@ export const getLCodeParams = async (db: SQLite.SQLiteDatabase, stnID: string, c
         return null
     }
 }
+
+export const createCodeParameter = async (
+    db: SQLite.SQLiteDatabase,
+    parameter: {
+        stnID: number;
+        cID: number;
+        par: string;
+        var: string;
+        varname: string;
+        uID?: number;
+    }
+) => {
+    try {
+        const result = await db.runAsync(
+            `INSERT INTO codeparameter (stnID, cID, par, var, varname, uID, dateadded, dateupdated)
+             VALUES (?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))`,
+            [parameter.stnID, parameter.cID, parameter.par, parameter.var, parameter.varname, parameter.uID || null]
+        );
+
+        console.log("Code parameter created successfully with ID:", result.lastInsertRowId);
+        return result.lastInsertRowId;
+    } catch (error) {
+        console.error("Error creating code parameter:", error);
+        throw error;
+    }
+};
 
 export const getLCategories = async (db: SQLite.SQLiteDatabase) => {
     try {
@@ -1829,4 +2060,332 @@ export const deleteSmsRecipient = async (
     } catch (error) {
         console.error("Error deleting SMS recipient:", error);
     }
+};
+
+export const upsertAerodromeData = async (
+    db: SQLite.WebSQLDatabase | SQLite.SQLiteDatabase,
+    data: any
+) => {
+    try {
+        const sql = `
+            INSERT INTO aerodrome (
+                stnID, uID, MorS, sDate, sHour,
+                SurfaceWind, PresVV, PresWx,
+                Cloud1, Cloud2, Cloud3, Cloud4,
+                Tem, Dew, AltPres,
+                Supplemental, Remarks,
+                Signature, ATS
+            )
+            VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+            ON CONFLICT(stnID, MorS, sDate, sHour)
+            DO UPDATE SET
+                SurfaceWind = excluded.SurfaceWind,
+                PresVV = excluded.PresVV,
+                PresWx = excluded.PresWx,
+                Cloud1 = excluded.Cloud1,
+                Cloud2 = excluded.Cloud2,
+                Cloud3 = excluded.Cloud3,
+                Cloud4 = excluded.Cloud4,
+                Tem = excluded.Tem,
+                Dew = excluded.Dew,
+                AltPres = excluded.AltPres,
+                Supplemental = excluded.Supplemental,
+                Remarks = excluded.Remarks,
+                Signature = excluded.Signature,
+                ATS = excluded.ATS,
+                date_updated = datetime('now')
+        `;
+
+        const values = [
+            data.stnID,
+            data.uID || null,
+            data.MorS,
+            data.sDate,
+            data.sHour,
+            data.SurfaceWind,
+            data.PresVV,
+            data.PresWx,
+            data.Cloud1,
+            data.Cloud2,
+            data.Cloud3,
+            data.Cloud4,
+            data.Tem,
+            data.Dew,
+            data.AltPres,
+            data.Supplemental,
+            data.Remarks,
+            data.Signature,
+            data.ATS
+        ];
+
+        await db.runAsync(sql, values);
+
+        console.log(`Upserted aerodrome for station ${data.stnID} on ${data.sDate} at ${data.sHour}`);
+    } catch (err) {
+        console.error("Error upserting aerodrome:", err);
+        throw err;
+    }
+};
+
+export const seedTAerodrome = async (db: SQLite.SQLiteDatabase) => {
+    try {
+        // Check if aerodrome table is already seeded
+        const existing = await db.getFirstAsync(
+            `SELECT COUNT(*) as count FROM aerodrome`
+        );
+
+        if (existing.count > 0) {
+            console.log("Aerodrome data already seeded, skipping...");
+            return;
+        }
+
+        // Fetch aerodrome data from API for seeding
+        console.log("Fetching aerodrome data from API for seeding...");
+        const apiResponse = await getAerodromeData({
+            limit: 10, // Fetch a limited number of records for seeding
+        });
+
+        if (!apiResponse.results || apiResponse.results.length === 0) {
+            console.log("No aerodrome data available from API, skipping seeding...");
+            return;
+        }
+
+        const aerodromeData = apiResponse.results;
+
+        console.log(`Seeding ${aerodromeData.length} aerodrome records from API...`);
+
+        await withTransaction(db, async (tx) => {
+            for (const obs of aerodromeData) {
+                await tx.runAsync(
+                    `
+                    INSERT OR REPLACE INTO aerodrome (
+                        stnID, uID, MorS, sDate, sHour,
+                        SurfaceWind, PresVV, PresWx,
+                        Cloud1, Cloud2, Tem, Dew,
+                        AltPres, Signature, ATS
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    `,
+                    [
+                        obs.stnID,
+                        obs.uID,
+                        obs.MorS,
+                        obs.sDate,
+                        obs.sHour,
+                        obs.SurfaceWind ?? null,
+                        obs.PresVV ?? null,
+                        obs.PresWx ?? null,
+                        obs.Cloud1 ?? null,
+                        obs.Cloud2 ?? null,
+                        obs.Tem ?? null,
+                        obs.Dew ?? null,
+                        obs.AltPres ?? null,
+                        obs.Signature ?? null,
+                        obs.ATS ?? null
+                    ]
+                );
+            }
+        });
+
+        console.log("Aerodrome data seeded successfully from API.");
+
+    } catch (error) {
+        console.error("Error seeding aerodrome data:", error);
+    }
+};
+
+export const seedTSmsRecipients = async (db: SQLite.SQLiteDatabase) => {
+    try {
+        // Check if sms_recipients table is already seeded
+        const existing = await db.getFirstAsync(
+            `SELECT COUNT(*) as count FROM sms_recipients`
+        );
+
+        if (existing.count > 0) {
+            console.log("SMS recipients already seeded, skipping...");
+            return;
+        }
+
+        // Fetch SMS recipients from API for seeding
+        console.log("Fetching SMS recipients from API for seeding...");
+        const recipients = await getSmsRecipientsAPI();
+
+        if (!recipients || recipients.length === 0) {
+            console.log("No SMS recipients available from API, skipping seeding...");
+            return;
+        }
+
+        console.log(`Seeding ${recipients.length} SMS recipients from API...`);
+
+        await withTransaction(db, async (tx) => {
+            for (const recipient of recipients) {
+                await tx.runAsync(
+                    `
+                    INSERT OR REPLACE INTO sms_recipients (
+                        recipId, stnId, uId, cID, num, name, date_added, date_updated
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    `,
+                    [
+                        recipient.recipId ?? null,
+                        recipient.stnId ?? null,
+                        recipient.uId ?? null,
+                        recipient.cID ?? null,
+                        recipient.num ?? '',
+                        recipient.name ?? null,
+                        recipient.date_added ?? new Date().toISOString(),
+                        recipient.date_updated ?? null
+                    ]
+                );
+            }
+        });
+
+        console.log("SMS recipients seeded successfully from API.");
+
+    } catch (error) {
+        console.error("Error seeding SMS recipients:", error);
+    }
+};
+
+export const seedTSmsLogs = async (db: SQLite.SQLiteDatabase) => {
+    try {
+        // Check if sms_logs table is already seeded
+        const existing = await db.getFirstAsync(
+            `SELECT COUNT(*) as count FROM sms_logs`
+        );
+
+        if (existing.count > 0) {
+            console.log("SMS logs already seeded, skipping...");
+            return;
+        }
+
+        // Sample SMS logs data for seeding (since there's no API to fetch historical logs)
+        const smsLogsData = [
+            {
+                stnId: 1,
+                uId: 1,
+                category: "SYNOP",
+                status: "sent",
+                msg: "SYNOP data for station 1 at 2024-01-01 1200",
+                recip_num: "+1234567890",
+                recip_name: "Test Recipient 1",
+                obsDate: "2024-01-01",
+                obsHour: "1200",
+                dateSent: "2024-01-01T12:00:00Z",
+                channel: "skyobs"
+            },
+            {
+                stnId: 1,
+                uId: 1,
+                category: "METAR",
+                status: "sent",
+                msg: "METAR data for station 1 at 2024-01-01 1200",
+                recip_num: "+1234567891",
+                recip_name: "Test Recipient 2",
+                obsDate: "2024-01-01",
+                obsHour: "1200",
+                dateSent: "2024-01-01T12:00:00Z",
+                channel: "skyobs"
+            }
+        ];
+
+        console.log(`Seeding ${smsLogsData.length} SMS log records...`);
+
+        await withTransaction(db, async (tx) => {
+            for (const log of smsLogsData) {
+                await tx.runAsync(
+                    `
+                    INSERT OR REPLACE INTO sms_logs (
+                        stnId, uId, category, status, msg, recip_num, recip_name,
+                        obsDate, obsHour, dateSent, channel
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    `,
+                    [
+                        log.stnId,
+                        log.uId,
+                        log.category,
+                        log.status,
+                        log.msg,
+                        log.recip_num,
+                        log.recip_name,
+                        log.obsDate,
+                        log.obsHour,
+                        log.dateSent,
+                        log.channel
+                    ]
+                );
+            }
+        });
+
+        console.log("SMS logs seeded successfully.");
+
+    } catch (error) {
+        console.error("Error seeding SMS logs:", error);
+    }
+};
+// Escape CSV values safely
+const escapeCsvValue = (value: any) => {
+    if (value === null || value === undefined) return '';
+    const stringValue = String(value);
+    const escaped = stringValue.replace(/"/g, '""');
+    return `"${escaped}"`;
+};
+
+// Convert rows to CSV string
+const rowsToCsv = (rows: Record<string, any>[]) => {
+    if (!rows || rows.length === 0) return '';
+    const headers = Object.keys(rows[0]);
+    const csvHeader = headers.map(escapeCsvValue).join(',');
+    const csvRows = rows.map(row =>
+        headers.map(header => escapeCsvValue(row[header])).join(',')
+    );
+    return [csvHeader, ...csvRows].join('\n');
+};
+
+export const exportAllDataToCsv = async (db: SQLite.SQLiteDatabase) => {
+    const tables = [
+        'stations',
+        'category',
+        'synop_data',
+        'aerodrome',
+        'codetemplate',
+        'codeparameter',
+        'psychrometric',
+        'sms_recipients',
+        'sms_logs',
+        'user_config',
+    ];
+
+    const sections: string[] = [];
+
+    for (const table of tables) {
+        try {
+            const rows = await db.getAllAsync(`SELECT * FROM ${table}`);
+            if (!rows || rows.length === 0) {
+                sections.push(`TABLE: ${table}\n(no rows)`);
+                continue;
+            }
+            sections.push(`TABLE: ${table}\n${rowsToCsv(rows)}`);
+        } catch (error) {
+            console.error(`Failed to export ${table}:`, error);
+            sections.push(`TABLE: ${table}\nERROR: could not export table`);
+        }
+    }
+
+    const csvContent = sections.join('\n\n');
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const fileName = `skyobs-export-${timestamp}.csv`;
+
+    const documentsDir: Directory = Paths.document;
+    if (!documentsDir) throw new Error('Document directory unavailable');
+
+    const csvFile = new File(documentsDir, fileName);
+
+    // --- FIXED: single writer usage ---
+    const writer = csvFile.writableStream().getWriter();
+    const encoder = new TextEncoder();
+    await writer.write(encoder.encode(csvContent));
+    await writer.close(); // only close once!
+
+    console.log('CSV saved at:', csvFile.uri);
+
+    return { fileUri: csvFile.uri, fileName };
 };

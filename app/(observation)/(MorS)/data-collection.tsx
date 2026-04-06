@@ -6,7 +6,9 @@ import { Heading } from "@/components/ui/heading";
 import { Input, InputField } from "@/components/ui/input";
 import { Text } from "@/components/ui/text";
 import { Textarea, TextareaInput } from "@/components/ui/textarea";
-import { getDB, getLSynopData } from "@/src/utils/db";
+import { useUser } from "@/src/context/UserContext";
+import { saveAerodromeData } from "@/src/utils/api";
+import { getDB, getLSynopData, upsertAerodromeData } from "@/src/utils/db";
 import { router, useLocalSearchParams } from "expo-router";
 import { Goal } from "lucide-react-native";
 import { useEffect, useState } from "react";
@@ -14,6 +16,7 @@ import { KeyboardAwareScrollView } from "react-native-keyboard-controller";
 import { SafeAreaView } from "react-native-safe-area-context";
 
 export default function DataCollectionScreen() {
+    const { user } = useUser();
     const onSave = async () => {
         setIsSaveBtnLoading(true);
 
@@ -22,6 +25,7 @@ export default function DataCollectionScreen() {
 
             const record = {
                 stnID: Number(params.stationId),
+                uID: user?.user_id,
                 MorS: MorS,
                 sDate: params.date,
                 sHour: params.time,
@@ -47,119 +51,14 @@ export default function DataCollectionScreen() {
                 ATS: formData.ATS || null
             };
 
-            await db.withTransactionAsync(async () => {
+            await upsertAerodromeData(db, record);
 
-                const res = await db.runAsync(
-                    `UPDATE aerodrome SET
-                    SurfaceWind = ?,
-                    PresVV = ?,
-                    PresWx = ?,
-
-                    Cloud1 = ?,
-                    Cloud2 = ?,
-                    Cloud3 = ?,
-                    Cloud4 = ?,
-
-                    Tem = ?,
-                    Dew = ?,
-                    AltPres = ?,
-
-                    Supplemental = ?,
-                    Remarks = ?,
-
-                    Signature = ?,
-                    ATS = ?,
-
-                    date_updated = datetime('now')
-
-                 WHERE stnID = ?
-                 AND MorS = ?
-                 AND sDate = ?
-                 AND sHour = ?`,
-                    [
-                        record.SurfaceWind,
-                        record.PresVV,
-                        record.PresWx,
-
-                        record.Cloud1,
-                        record.Cloud2,
-                        record.Cloud3,
-                        record.Cloud4,
-
-                        record.Tem,
-                        record.Dew,
-                        record.AltPres,
-
-                        record.Supplemental,
-                        record.Remarks,
-
-                        record.Signature,
-                        record.ATS,
-
-                        record.stnID,
-                        record.MorS,
-                        record.sDate,
-                        record.sHour
-                    ]
-                );
-
-                if (!res || (res.rowsAffected ?? res.changes ?? 0) === 0) {
-
-                    await db.runAsync(
-                        `INSERT INTO aerodrome (
-                        stnID,
-                        MorS,
-                        sDate,
-                        sHour,
-
-                        SurfaceWind,
-                        PresVV,
-                        PresWx,
-
-                        Cloud1,
-                        Cloud2,
-                        Cloud3,
-                        Cloud4,
-
-                        Tem,
-                        Dew,
-                        AltPres,
-
-                        Supplemental,
-                        Remarks,
-
-                        Signature,
-                        ATS
-                    )
-                    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-                        [
-                            record.stnID,
-                            record.MorS,
-                            record.sDate,
-                            record.sHour,
-
-                            record.SurfaceWind,
-                            record.PresVV,
-                            record.PresWx,
-
-                            record.Cloud1,
-                            record.Cloud2,
-                            record.Cloud3,
-                            record.Cloud4,
-
-                            record.Tem,
-                            record.Dew,
-                            record.AltPres,
-
-                            record.Supplemental,
-                            record.Remarks,
-
-                            record.Signature,
-                            record.ATS
-                        ]
-                    );
-                }
-            });
+            // Save to API
+            try {
+                await saveAerodromeData(record);
+            } catch (apiErr) {
+                console.warn("Failed to save aerodrome data to API:", apiErr);
+            }
 
             setAlertTitle("Success");
             setAlertMessage("Aerodrome observation saved successfully.");
@@ -262,7 +161,7 @@ export default function DataCollectionScreen() {
                     ...prev,
                     wDir: synop[0]?.wDir?.toString().padStart(3, "0") ?? "",
                     wSpd: synop[0]?.wSpd != null
-                        ? (synop[0].wSpd * 2).toString().padStart(2, "0").slice(1)
+                        ? (Number(synop[0].wSpd) * 2).toString().padStart(2, "0").slice(1)
                         : "",
                     VV: synop[0]?.VV?.toString() ?? "",
                     PresVV: synop[0]?.VV != null
@@ -748,6 +647,7 @@ export default function DataCollectionScreen() {
                                         onChangeText={(text) =>
                                             setFormData((prev) => ({ ...prev, Tem: text }))
                                         }
+                                        keyboardType="numeric"
                                     />
                                     <Box className="h-full items-center justify-center min-w-12  border-l border-neutral-200 bg-neutral-50">
                                         <Text>°C</Text>
@@ -765,6 +665,7 @@ export default function DataCollectionScreen() {
                                         onChangeText={(text) =>
                                             setFormData((prev) => ({ ...prev, Dew: text }))
                                         }
+                                        keyboardType="numeric"
                                     />
                                     <Box className="h-full items-center justify-center min-w-12  border-l border-neutral-200 bg-neutral-50">
                                         <Text>°C</Text>
@@ -798,6 +699,7 @@ export default function DataCollectionScreen() {
                                         onChangeText={(text) =>
                                             setFormData((prev) => ({ ...prev, altP: text }))
                                         }
+                                        keyboardType="numeric"
                                     />
                                     <Box className="h-full items-center justify-center min-w-12 border-l border-neutral-200 bg-neutral-50">
                                         <Text>hPa</Text>

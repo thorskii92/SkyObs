@@ -53,6 +53,7 @@ export default function Home() {
       const db = await getDB();
       const stnID = user?.station_id;
 
+      console.log("Fetching synoptic data for station ID:", stnID, "and date:", formatDate(date));
       // 1️⃣ Get local observed data
       let results = await getLObservedData(
         db,
@@ -60,6 +61,8 @@ export default function Home() {
         undefined,
         formatDate(date)
       );
+
+      console.log("Fetched observed data:", results);
 
       // 2️⃣ Check SMS status per category (simplified)
       const smsSynopSent = await checkSmsSentForCategory(db, "SYNOP");
@@ -105,7 +108,7 @@ export default function Home() {
       setIsLoading(false);
       setRefreshing(false);
     }
-  }, [date]);
+  }, [date, user?.station_id]);
 
   useEffect(() => {
     fetchSynopDataByDate();

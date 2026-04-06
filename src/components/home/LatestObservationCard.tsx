@@ -50,6 +50,7 @@ export default function LatestObservationCard({
 
     const isValidated = observation.isValidated === 1
     const status = isValidated ? "Validated" : "Recorded";
+    const hasSynop = observation.category?.includes("SYNOP");
 
     return (
         <Box className="p-4 bg-white border border-gray-300 rounded-xl shadow-md w-full">
@@ -77,7 +78,7 @@ export default function LatestObservationCard({
                         </BadgeText>
                     </Badge>
                 </Box>
-                {!observation.isValidated && (
+                {!observation.isValidated && hasSynop && (
                     <Pressable onPress={onNavigateEditScreen}>
                         <Icon as={SquarePen} className="text-gray-500" />
                     </Pressable>
@@ -198,15 +199,17 @@ export default function LatestObservationCard({
                     >
                         <ButtonText className="text-sm font-medium">Send Code</ButtonText>
                     </Button>
-                    <Button
-                        size="sm"
-                        action="positive"
-                        variant="solid"
-                        onPress={onNavigateViewScreen}
-                        className="min-w-24 bg-blue-400"
-                    >
-                        <ButtonText>View Data</ButtonText>
-                    </Button>
+                    {hasSynop && (
+                        <Button
+                            size="sm"
+                            action="positive"
+                            variant="solid"
+                            onPress={onNavigateViewScreen}
+                            className="min-w-24 bg-blue-400"
+                        >
+                            <ButtonText>View Data</ButtonText>
+                        </Button>
+                    )}
                 </ButtonGroup>
             </Box>
         </Box>

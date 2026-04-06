@@ -85,9 +85,11 @@ export default function RecentObservationsTable({
             },
         });
     };
+    const getRowKey = (item: SynopRow, index?: number) =>
+        `${item.stnID || 'unknown'}_${item.sDate || 'unknown'}_${item.sHour || 'unknown'}_${index || 0}`;
 
     // Track which popover is open by row ID
-    const [openPopoverId, setOpenPopoverId] = useState<string | number | null>(null);
+    const [openPopoverId, setOpenPopoverId] = useState<string | null>(null);
     const closePopover = () => setOpenPopoverId(null);
 
     return (
@@ -128,7 +130,9 @@ export default function RecentObservationsTable({
 
                             <FlatList
                                 data={synopData}
-                                keyExtractor={(item) => item.sID.toString()}
+                                keyExtractor={(item, index) =>
+                                    `${item.stnID || 'unknown'}_${item.sDate || 'unknown'}_${item.sHour || 'unknown'}_${index}`
+                                }
                                 renderItem={({ item, index }) => (
                                     <TableRow className={index % 2 === 0 ? "bg-white" : "bg-background-50"}>
                                         {/* Code button */}
@@ -173,13 +177,17 @@ export default function RecentObservationsTable({
                                         <TableData className=" p-2 w-[35px]">
                                             <Popover
                                                 placement="bottom right"
-                                                isOpen={openPopoverId === item.sID}
+                                                isOpen={openPopoverId === getRowKey(item, index)}
                                                 onClose={closePopover}
                                                 trigger={(triggerProps) => (
                                                     <Pressable
                                                         {...triggerProps}
                                                         onPress={() =>
-                                                            setOpenPopoverId(openPopoverId === item.sID ? null : item.sID)
+                                                            setOpenPopoverId(
+                                                                openPopoverId === getRowKey(item, index)
+                                                                    ? null
+                                                                    : getRowKey(item, index)
+                                                            )
                                                         }
                                                     >
                                                         <Icon as={MoreVertical} />

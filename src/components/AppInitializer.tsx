@@ -14,9 +14,12 @@ import {
     createTStations,
     createTSynopData,
     createTUserConfig,
+    seedTAerodrome,
     seedTCategories,
     seedTCodeParametersIfEmpty,
     seedTCodeTemplatesIfEmpty,
+    seedTSmsLogs,
+    seedTSmsRecipients,
     seedTStationsIfEmpty,
     seedTSynopDataIfEmpty,
     testTables
@@ -60,11 +63,20 @@ export default function AppInitializer({ children }: { children: React.ReactNode
                 setMessage('Seeding synop...');
                 await seedTSynopDataIfEmpty(db);
 
+                setMessage('Seeding aerodrome...');
+                await seedTAerodrome(db);
+
                 setMessage('Seeding templates...');
                 await seedTCodeTemplatesIfEmpty(db);
 
                 setMessage('Seeding parameters...');
                 await seedTCodeParametersIfEmpty(db);
+
+                setMessage('Seeding SMS recipients...');
+                await seedTSmsRecipients(db);
+
+                setMessage('Seeding SMS logs...');
+                await seedTSmsLogs(db);
 
                 if (__DEV__) {
                     setMessage('Checking local database...');

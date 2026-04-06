@@ -386,7 +386,7 @@ export default function DataView({ observedData }) {
                             </GridItem>
                             <GridItem _extra={{ className: "col-span-2" }}>
                                 <Text size="xs" bold className="text-gray-500 mb-1">Ceiling</Text>
-                                <Text>{formatValue(observedData.ceiling)}</Text>
+                                <Text>{String(observedData.ceiling) === "9999" ? "UNL" : formatValue(observedData.ceiling, "m")}</Text>
                             </GridItem>
 
                             <GridItem _extra={{ className: "col-span-1" }}>

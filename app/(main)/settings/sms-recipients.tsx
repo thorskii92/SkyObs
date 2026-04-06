@@ -26,6 +26,8 @@ import { VStack } from "@/components/ui/vstack";
 import { useSQLiteContext } from "expo-sqlite";
 import React, { useEffect, useState } from "react";
 
+import { ContactPickerModal } from "@/src/components/ContactPickerModal";
+import { Contact } from "@/src/hooks/useContacts";
 import {
     deleteSmsRecipientAPI,
     upsertSmsRecipientAPI
@@ -55,6 +57,7 @@ export default function SMSRecipientsScreen() {
     const [selectedItem, setSelectedItem] = useState<any | null>(null);
 
     const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [showContactPicker, setShowContactPicker] = useState(false);
 
     const loadData = async () => {
         const r = await getLSmsRecipients(db, { stnId: 1 });
@@ -76,6 +79,17 @@ export default function SMSRecipientsScreen() {
         if (!num || cID === null) return;
         setDialogType("save");
         setIsOpen(true);
+    };
+
+    const handleSelectContact = (contact: Contact, phoneNumber: string) => {
+        setName(contact.name);
+        // Format phone number (remove spaces/dashes)
+        const formattedNumber = phoneNumber.replace(/[-()\s]/g, "");
+        setNum(formattedNumber);
+        // Keep the selected category or use the first one
+        if (cID === null && categories.length > 0) {
+            setCID(categories[0].cID);
+        }
     };
 
     const handleEdit = (item: any) => {
@@ -167,6 +181,13 @@ export default function SMSRecipientsScreen() {
 
                     {/* Form */}
                     <VStack className="gap-2">
+                        <Button 
+                            variant="outline"
+                            onPress={() => setShowContactPicker(true)}
+                        >
+                            <ButtonText>📱 Import from Contacts</ButtonText>
+                        </Button>
+
                         <Input>
                             <InputField
                                 placeholder="Name"
@@ -341,7 +362,12 @@ export default function SMSRecipientsScreen() {
                 </AlertDialogContent>
             </AlertDialog>
 
-            {/* ERROR ALERT */}
+            {/* Contact Picker Modal */}
+            <ContactPickerModal
+                isOpen={showContactPicker}
+                onClose={() => setShowContactPicker(false)}
+                onSelectContact={handleSelectContact}
+            />
             <AlertDialog
                 isOpen={!!errorMessage}
                 onClose={() => setErrorMessage(null)}
